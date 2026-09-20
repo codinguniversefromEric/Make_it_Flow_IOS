@@ -237,7 +237,7 @@ struct DebugPageView: View {
                 }
                 
                 // 繪製語意分類段落框 (半透明藍色)
-                for para in paragraphs where !LayoutEngine.shouldDrop(para.role) {
+                for para in paragraphs {
                     let roleColor = getRoleColor(for: para.role)
                     context.setStrokeColor(roleColor.withAlphaComponent(0.5).cgColor)
                     context.setLineWidth(1.0)

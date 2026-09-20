@@ -401,10 +401,18 @@ final class EPUBSynthesizer: Sendable {
             
             // 圖片資源清單
             var imageManifest = ""
+            var hasCover = false
             if fm.fileExists(atPath: assetsURL.path),
                let images = try? fm.contentsOfDirectory(atPath: assetsURL.path) {
                 for (index, image) in images.enumerated() where !image.hasPrefix(".") {
-                    imageManifest += "<item id=\"img\(index)\" href=\"assets/\(image)\" media-type=\"image/png\"/>\n"
+                    let isJPG = image.lowercased().hasSuffix(".jpg") || image.lowercased().hasSuffix(".jpeg")
+                    let mediaType = isJPG ? "image/jpeg" : "image/png"
+                    let isCover = image == "cover.jpg"
+                    if isCover { hasCover = true }
+                    
+                    let id = isCover ? "cover-image" : "img\(index)"
+                    let properties = isCover ? " properties=\"cover-image\"" : ""
+                    imageManifest += "<item id=\"\(id)\" href=\"assets/\(image)\" media-type=\"\(mediaType)\"\(properties)/>\n"
                 }
             }
             

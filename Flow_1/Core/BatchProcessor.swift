@@ -50,8 +50,8 @@ class BatchProcessor: ObservableObject {
     @MainActor
     func exportDocument(_ document: PDFDocument, fileName: String? = nil) async {
         // 向系統申請背景執行權限，確保關閉螢幕或退到背景時轉檔與動態島繼續運作 (Issue: 背景凍結)
-        var bgTaskID: UIBackgroundTaskIdentifier = .invalid
 #if os(iOS)
+        var bgTaskID: UIBackgroundTaskIdentifier = .invalid
         bgTaskID = UIApplication.shared.beginBackgroundTask(withName: "PDF_Export_Task") {
             UIApplication.shared.endBackgroundTask(bgTaskID)
             bgTaskID = .invalid
@@ -168,6 +168,15 @@ class BatchProcessor: ObservableObject {
                 }
                 
                 guard let validCGImg = cgImg, let validRawImage = rawImage else { continue }
+                
+                // --- 封面擷取 (第 1 頁) ---
+                if pageIndex == 0 {
+                    if let imageData = validRawImage.appJPEGData(compressionQuality: 0.85) {
+                        let fileURL = assetsDir.appendingPathComponent("cover.jpg")
+                        try? imageData.write(to: fileURL)
+                        AppLogger.shared.info("🖼️ 成功儲存封面圖片 cover.jpg")
+                    }
+                }
                 
                 // ═══════════════════════════════════════════
                 // STAGE 1: YOLO 視覺區域偵測 (圖片/表格/公式)
@@ -355,7 +364,7 @@ class BatchProcessor: ObservableObject {
                 
                 // 文字段落 → Markdown
                 for block in paragraphs {
-                    if LayoutEngine.shouldDrop(block.role) { continue }
+                    if LayoutEngine.shouldDrop(block: block, pageHeight: scaledSize.height) { continue }
                     
                     // 📖 擷取文件標題
                     if block.role == .title {
@@ -380,7 +389,7 @@ class BatchProcessor: ObservableObject {
                 
                 // 📖 智慧分章
                 if pageIndex > 0 {
-                    if let firstBlock = paragraphs.first(where: { !LayoutEngine.shouldDrop($0.role) }),
+                    if let firstBlock = paragraphs.first(where: { !LayoutEngine.shouldDrop(block: $0, pageHeight: scaledSize.height) }),
                        firstBlock.role == .title || firstBlock.role == .heading {
                         
                         let text = firstBlock.unifiedText.lowercased()
