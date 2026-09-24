@@ -419,13 +419,7 @@ class BatchProcessor: ObservableObject {
                         // 根據角色、正規表示式、或字體大小判定是否為章節起點
                         if firstBlock.role == .title || isChapterRegex || isH1 {
                             fullHTML += "<!-- CHAPTER_SPLIT -->\n\n"
-                        } else if firstBlock.bounds.minY < 100 * scale {
-                            // 備用：位於頁面最頂端的 heading 也可能是一個章節
-                            fullHTML += "<!-- CHAPTER_SPLIT -->\n\n"
                         }
-                    } else if pageIndex % 15 == 0 {
-                        // 備用防呆
-                        fullHTML += "<!-- CHAPTER_SPLIT -->\n\n"
                     }
                 }
                 
