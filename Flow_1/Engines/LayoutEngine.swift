@@ -78,9 +78,29 @@ enum LayoutEngine: Sendable {
             finalParagraphs.append(buildParagraphBlock(from: sortedFrags, role: role))
         }
 
-        // 4. 將未被 YOLO 框選的邊角碎片丟棄 (在 99% 架構下，KMP 會接手防漏抓)
+        // 4. 對未被 YOLO 框選的碎片進行 fallback 處理，避免漏字
+        if !unassignedFragments.isEmpty {
+            // 按 Y 軸排序，然後用 proximity grouping 組裝成段落
+            let ySortedOrphans = unassignedFragments.sorted { $0.bounds.minY < $1.bounds.minY }
+            var currentGroup: [TextFragment] = [ySortedOrphans[0]]
             
-        // 將兩者混合後，使用標準的閱讀順序排序 (分區段 -> 分欄 -> 排序)
+            for i in 1..<ySortedOrphans.count {
+                let curr = ySortedOrphans[i]
+                let prevMaxY = currentGroup.last!.bounds.maxY
+                // 如果 Y 軸間隔小於一行高度 (約 20pt)，視為同一段落
+                if curr.bounds.minY - prevMaxY < 20.0 {
+                    currentGroup.append(curr)
+                } else {
+                    finalParagraphs.append(buildParagraphBlock(from: currentGroup, role: .body))
+                    currentGroup = [curr]
+                }
+            }
+            if !currentGroup.isEmpty {
+                finalParagraphs.append(buildParagraphBlock(from: currentGroup, role: .body))
+            }
+        }
+            
+        // 將所有段落使用標準的閱讀順序排序 (分區段 -> 分欄 -> 排序)
         return sortParagraphBlocks(finalParagraphs, pageWidth: pageWidth)
     }
 
@@ -91,11 +111,6 @@ enum LayoutEngine: Sendable {
         guard blocks.count > 1 else { return blocks }
         
         let ySorted = blocks.sorted { $0.bounds.minY < $1.bounds.minY }
-        print("🔍 ySorted blocks (\(ySorted.count)):")
-        for b in ySorted {
-            let text = b.unifiedText.replacingOccurrences(of: "\n", with: " ").prefix(30)
-            print("  minY: \(String(format: "%.1f", b.bounds.minY)), text: \(text)")
-        }
         
         var regions: [[ParagraphBlock]] = []
         var currentRegion: [ParagraphBlock] = [ySorted[0]]
@@ -106,7 +121,13 @@ enum LayoutEngine: Sendable {
             let curr = ySorted[i]
             let gap = curr.bounds.minY - currentMaxY
             
-            if gap > regionBreakGap {
+            // 如果這是一個佔據版面 > 60% 的超寬區塊 (例如大標題、摘要)，強制切斷 Region！
+            // 這樣可以避免置中標題被吸進雙欄的排序災難裡
+            // 注意：雙欄論文每欄約 45% 寬，所以閾值必須 > 0.5
+            let isFullWidth = curr.bounds.width > (pageWidth * 0.6)
+            let prevIsFullWidth = currentRegion.last!.bounds.width > (pageWidth * 0.6)
+            
+            if gap > regionBreakGap || isFullWidth || prevIsFullWidth {
                 regions.append(currentRegion)
                 currentRegion = [curr]
                 currentMaxY = curr.bounds.maxY
@@ -120,34 +141,24 @@ enum LayoutEngine: Sendable {
         var finalSorted: [ParagraphBlock] = []
         
         for region in regions {
-            guard region.count > 1 else {
+            if region.count <= 1 {
                 finalSorted.append(contentsOf: region)
                 continue
             }
             
+            // 使用「區塊中線 (Center X)」來分欄，徹底解決 minX 因為突發寬度而崩潰的問題
+            let xSorted = region.sorted { $0.bounds.midX < $1.bounds.midX }
             var columns: [[ParagraphBlock]] = []
-            let xSorted = region.sorted { $0.bounds.minX < $1.bounds.minX }
-            
             var currentColumn: [ParagraphBlock] = [xSorted[0]]
-            var currentMaxX = xSorted[0].bounds.maxX
-            let columnGutterGap = pageWidth * 0.025
             
             for i in 1..<xSorted.count {
-            let curr = xSorted[i]
-            let prev = xSorted[i-1]
-            let xJump = curr.bounds.minX - prev.bounds.minX
-            
-            if xJump > pageWidth * 0.15 {
-                    let minX = currentColumn.map { $0.bounds.minX }.min()!
-                    let maxX = currentColumn.map { $0.bounds.maxX }.max()!
-                    let colWidth = maxX - minX
-                    
-                    if colWidth < (pageWidth * 0.10) {
-                        currentColumn.append(curr)
-                    } else {
-                        columns.append(currentColumn)
-                        currentColumn = [curr]
-                    }
+                let curr = xSorted[i]
+                let prev = currentColumn.last!
+                let centerJump = curr.bounds.midX - prev.bounds.midX
+                
+                if centerJump > pageWidth * 0.15 {
+                    columns.append(currentColumn)
+                    currentColumn = [curr]
                 } else {
                     currentColumn.append(curr)
                 }
@@ -155,22 +166,9 @@ enum LayoutEngine: Sendable {
             if !currentColumn.isEmpty { columns.append(currentColumn) }
             
             for col in columns {
-                let xySortedCol = col.sorted { a, b in
-                    let yA = round(a.bounds.minY / 15.0)
-                    let yB = round(b.bounds.minY / 15.0)
-                    if yA == yB {
-                        return a.bounds.minX < b.bounds.minX
-                    }
-                    return yA < yB
-                }
-                finalSorted.append(contentsOf: xySortedCol)
+                let ySortedCol = col.sorted { $0.bounds.minY < $1.bounds.minY }
+                finalSorted.append(contentsOf: ySortedCol)
             }
-        }
-        
-        print("🔍 finalSorted blocks (\(finalSorted.count)):")
-        for b in finalSorted {
-            let text = b.unifiedText.replacingOccurrences(of: "\n", with: " ").prefix(30)
-            print("  minY: \(String(format: "%.1f", b.bounds.minY)), text: \(text)")
         }
         
         return finalSorted
@@ -228,43 +226,30 @@ enum LayoutEngine: Sendable {
     private nonisolated static func sortRegionColumns(_ region: [(block: LayoutBlock, rect: CGRect)], pageWidth: CGFloat) -> [(block: LayoutBlock, rect: CGRect)] {
         guard region.count > 1 else { return region }
         
-        // 投射到 X 軸，找出欄位
+        // 判斷該 Region 是否只有單一寬區塊，避免強制分欄
+        let xSorted = region.sorted { $0.rect.midX < $1.rect.midX }
+        
         var columns: [[(block: LayoutBlock, rect: CGRect)]] = []
-        
-        // 將區塊依 X 座標由左至右排序
-        let xSorted = region.sorted { $0.rect.minX < $1.rect.minX }
-        
         var currentColumn: [(block: LayoutBlock, rect: CGRect)] = [xSorted[0]]
-        var currentMaxX = xSorted[0].rect.maxX
-        let columnGutterGap = pageWidth * 0.025
         
         for i in 1..<xSorted.count {
             let curr = xSorted[i]
-            let prev = xSorted[i-1]
-            let xJump = curr.rect.minX - prev.rect.minX
+            let prev = currentColumn.last!
+            let centerJump = curr.rect.midX - prev.rect.midX
             
-            if xJump > pageWidth * 0.15 {
-                let minX = currentColumn.map { $0.rect.minX }.min()!
-                let colWidth = currentMaxX - minX
-                
-                if colWidth < (pageWidth * 0.10) {
-                    currentColumn.append(curr)
-                } else {
-                    columns.append(currentColumn)
-                    currentColumn = [curr]
-                }
+            // 基於 Center X 分欄
+            if centerJump > pageWidth * 0.15 {
+                columns.append(currentColumn)
+                currentColumn = [curr]
             } else {
                 currentColumn.append(curr)
             }
         }
-        if !currentColumn.isEmpty {
-            columns.append(currentColumn)
-        }
+        if !currentColumn.isEmpty { columns.append(currentColumn) }
         
-        // 對每一欄內部的區塊進行 Y 軸排序 (由上而下)；若 Y 座標極為接近(同一行)，則依 X 軸排序(由左而右)
         var sortedRegion: [(block: LayoutBlock, rect: CGRect)] = []
         for col in columns {
-            let xySortedCol = col.sorted { a, b in
+            let ySortedCol = col.sorted { a, b in
                 let yA = round(a.rect.minY / 15.0)
                 let yB = round(b.rect.minY / 15.0)
                 if yA == yB {
@@ -272,7 +257,7 @@ enum LayoutEngine: Sendable {
                 }
                 return yA < yB
             }
-            sortedRegion.append(contentsOf: xySortedCol)
+            sortedRegion.append(contentsOf: ySortedCol)
         }
         
         return sortedRegion
@@ -438,12 +423,32 @@ enum LayoutEngine: Sendable {
             let emSize = frag.fontSize / safeBase
             let formattedEm = String(format: "%.2f", emSize)
             
-            var style = "font-size: \(formattedEm)em;"
-            if let fontName = frag.fontName, !fontName.contains("System") && !fontName.contains("UI") && !fontName.contains("Math") && !fontName.contains("Symbol") {
-                style += " font-family: '\(fontName)', sans-serif;"
+            var style = ""
+            // [V2 Patch] 只在字體大小有明顯變化時才寫入 inline font-size，避免 Apple Books 樣式失靈
+            if abs(emSize - 1.0) > 0.15 {
+                style += "font-size: \(formattedEm)em;"
             }
-            if frag.isBold { style += " font-weight: bold;" }
-            if frag.isItalic { style += " font-style: italic;" }
+            
+            var isBold = frag.isBold
+            var isItalic = frag.isItalic
+            
+            if let fontName = frag.fontName {
+                let lowerFont = fontName.lowercased()
+                if lowerFont.contains("bold") { isBold = true }
+                if lowerFont.contains("italic") || lowerFont.contains("oblique") { isItalic = true }
+                
+                if !fontName.contains("System") && !fontName.contains("UI") && !fontName.contains("Math") && !fontName.contains("Symbol") {
+                    if lowerFont.contains("times") || lowerFont.contains("minion") || lowerFont.contains("georgia") || lowerFont.contains("cambria") || lowerFont.contains("serif") {
+                        style += " font-family: serif;"
+                    } else {
+                        // 不要寫死 fallback，讓 Reader 自由決定
+                    }
+                }
+            }
+            
+            style = style.trimmingCharacters(in: .whitespaces)
+            if isBold { style += " font-weight: bold;" }
+            if isItalic { style += " font-style: italic;" }
             if frag.colorHex != "#000000" { style += " color: \(frag.colorHex);" }
             
             innerHTML += "<span style=\"\(style)\">\(escapedText)</span> "

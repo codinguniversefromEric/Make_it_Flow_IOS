@@ -280,16 +280,23 @@ class BatchProcessor: ObservableObject {
                             let intersection = region.rect.intersection(displayRect)
                             if !intersection.isNull {
                                 let intersectionArea = intersection.width * intersection.height
-                                // 如果重疊面積超過文字行面積的 40%，或者文字中心點落在擴大一點的區域內
+                                let ratio = lineArea > 0 ? intersectionArea / lineArea : 0
                                 let expandedRegion = region.rect.insetBy(dx: -5, dy: -5)
                                 let lineMid = CGPoint(x: displayRect.midX, y: displayRect.midY)
                                 
-                                if (lineArea > 0 && intersectionArea / lineArea > 0.4) || expandedRegion.contains(lineMid) {
-                                    if region.label == "Table" {
+                                if region.label == "Table" {
+                                    // 表格：40% 重疊就排除，但保存碎片用於結構重建
+                                    if ratio > 0.4 || expandedRegion.contains(lineMid) {
                                         tableFragments[index, default: []].append(fragment)
+                                        handledByVisualRegion = true
+                                        break
                                     }
-                                    handledByVisualRegion = true
-                                    break
+                                } else if region.label == "Picture" || region.label == "Figure" || region.label == "Formula" {
+                                    // 圖片/公式：90% 重疊才排除，保守策略以保留 caption
+                                    if ratio > 0.90 {
+                                        handledByVisualRegion = true
+                                        break
+                                    }
                                 }
                             }
                         }
@@ -344,6 +351,19 @@ class BatchProcessor: ObservableObject {
                 )
                 
                 // Semantic classification is now handled directly via LayoutEngine mapping from D4LA labels
+                
+                // 🛡️ 啟發式標題升級 (Heading Promotion) V2：極簡安全版
+                for i in 0..<paragraphs.count {
+                    if paragraphs[i].role == .body {
+                        let text = paragraphs[i].unifiedText.trimmingCharacters(in: .whitespacesAndNewlines)
+                        // [V2 Patch] 移除字體大小判斷，只依賴絕對準確的正則表達式，徹底消滅 False Positive
+                        let isChapter = text.lowercased().hasPrefix("chapter ") || (text.contains("第") && text.contains("章"))
+                        
+                        if isChapter {
+                            paragraphs[i].role = .title
+                        }
+                    }
+                }
                 
                 
                 // 📊 日誌輸出

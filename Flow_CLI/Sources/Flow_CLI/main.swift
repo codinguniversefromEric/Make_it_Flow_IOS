@@ -26,7 +26,8 @@ func main() async {
         exit(1)
     }
     
-    AppLogger.shared.info("Starting Flow_CLI processing for \(inputURL.lastPathComponent) using \(selectedModel.rawValue)")
+    print("🚀 啟動 Flow_CLI: 正在處理 \(inputURL.lastPathComponent)")
+    print("🧠 載入視覺引擎: \(selectedModel.rawValue)")
     AppSettings.shared.selectedModel = selectedModel
     let processor = BatchProcessor()
     
