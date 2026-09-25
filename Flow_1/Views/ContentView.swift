@@ -80,17 +80,7 @@ struct ContentView: View {
             }
             .navigationViewStyle(.stack)
             
-            // 隱藏的定位器
-            Color.clear
-                .ignoresSafeArea()
-                .overlay(alignment: .top) {
-                    Capsule()
-                        .fill(Color.clear)
-                        .frame(width: 10, height: 1)
-                        .background(AnchorDetector(coordinateSpace: .global))
-                        .offset(y: -32)
-                }
-                .allowsHitTesting(false)
+
             
             // 流暢的水波紋動畫層
             animationOverlay
@@ -108,11 +98,7 @@ struct ContentView: View {
                     .accessibilityAddTraits(.isStaticText)
             }
         }
-        .onPreferenceChange(IslandAnchorKey.self) { center in
-            if center != .zero && vm.dynamicIslandCenter != center {
-                vm.dynamicIslandCenter = center
-            }
-        }
+
         .sheet(isPresented: $vm.showFilePicker) {
             PDFDocumentPicker { url in
                 vm.handlePickedPDF(url: url)
@@ -355,7 +341,7 @@ extension ContentView {
         private var animationOverlay: some View {
             if vm.animState != .idle {
                 GeometryReader { geo in
-                    let islandY = vm.dynamicIslandCenter.y == .zero ? 32 : vm.dynamicIslandCenter.y
+                    let islandY: CGFloat = 32
                     
                     ZStack(alignment: .top) {
                         

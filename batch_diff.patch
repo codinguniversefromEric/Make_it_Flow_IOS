@@ -1,0 +1,223 @@
+diff --git a/Flow_1/Core/BatchProcessor.swift b/Flow_1/Core/BatchProcessor.swift
+index ee2e374..b157326 100644
+--- a/Flow_1/Core/BatchProcessor.swift
++++ b/Flow_1/Core/BatchProcessor.swift
+@@ -94,7 +94,6 @@ class BatchProcessor: ObservableObject {
+             // 📖 These mutable variables are fully owned by the detached task to avoid data races
+             var detectedTitle = initialTitle
+             var fullHTML = ""
+-            var documentStream: [DocumentElement] = []
+             
+             // 🌐 全域文件樣式分析
+             AppLogger.shared.info("開始進行全域樣式分析...")
+@@ -200,14 +199,6 @@ class BatchProcessor: ObservableObject {
+                     if keep { filteredObs.append(obs) }
+                 }
+                 
+-                // --- 統一座標系 (Unify Coordinate System) ---
+-                // 將所有 YOLO 的 0~1 左下角原點座標，統一轉換為 Document Space (左上角原點，單位為 points)
+-                for i in 0..<filteredObs.count {
+-                    let cRect = VNImageRectForNormalizedRect(filteredObs[i].boundingBox, Int(scaledSize.width), Int(scaledSize.height))
+-                    let dRect = CGRect(x: cRect.minX, y: scaledSize.height - cRect.maxY, width: cRect.width, height: cRect.height)
+-                    filteredObs[i].boundingBox = dRect
+-                }
+-                
+                 // 分離視覺區域 vs 文字區域
+                 var visualRegions: [VisualRegion] = []
+                 var textRegionRects: [CGRect] = []
+@@ -215,7 +206,8 @@ class BatchProcessor: ObservableObject {
+                 for obs in filteredObs {
+                     let label = obs.label
+                     let conf = obs.confidence
+-                    let dRect = obs.boundingBox
++                    let cRect = VNImageRectForNormalizedRect(obs.boundingBox, Int(scaledSize.width), Int(scaledSize.height))
++                    let dRect = CGRect(x: cRect.minX, y: scaledSize.height - cRect.maxY, width: cRect.width, height: cRect.height)
+                     
+                     if label == "Picture" || label == "Figure" || label == "Formula" || label == "Table" {
+                         visualRegions.append(VisualRegion(label: label, rect: dRect, confidence: conf))
+@@ -239,8 +231,8 @@ class BatchProcessor: ObservableObject {
+                         
+                         let pRect = line.bounds(for: page)
+                         let displayRect = CGRect(
+-                            x: (pRect.minX - pageBounds.minX) * scale,
+-                            y: (pageBounds.maxY - pRect.maxY) * scale,
++                            x: pRect.minX * scale,
++                            y: (pageBounds.height - pRect.maxY) * scale,
+                             width: pRect.width * scale,
+                             height: pRect.height * scale
+                         )
+@@ -280,33 +272,28 @@ class BatchProcessor: ObservableObject {
+                             colorHex: colorHex
+                         )
+                         
+-                        // 🔍 判斷文字行是否落在視覺區域內，避免刪除 caption 或附近的正文
+-                        var shouldDropText = false
++                        // 🔍 排除落在視覺區域 (圖片/表格/公式) 內的文字行，但保留表格內的碎片用於結構重建
++                        var handledByVisualRegion = false
+                         let lineArea = displayRect.width * displayRect.height
+                         
+                         for (index, region) in visualRegions.enumerated() {
+                             let intersection = region.rect.intersection(displayRect)
+                             if !intersection.isNull {
+                                 let intersectionArea = intersection.width * intersection.height
+-                                let ratio = lineArea > 0 ? (intersectionArea / lineArea) : 0
++                                // 如果重疊面積超過文字行面積的 40%，或者文字中心點落在擴大一點的區域內
++                                let expandedRegion = region.rect.insetBy(dx: -5, dy: -5)
++                                let lineMid = CGPoint(x: displayRect.midX, y: displayRect.midY)
+                                 
+-                                if region.label == "Table" {
+-                                    // Table: 保留用於 table reconstruction，不強制從主流程刪除 (改為從主流程刪除，依照使用者要求)
+-                                    if ratio > 0.4 || region.rect.insetBy(dx: -5, dy: -5).contains(CGPoint(x: displayRect.midX, y: displayRect.midY)) {
++                                if (lineArea > 0 && intersectionArea / lineArea > 0.4) || expandedRegion.contains(lineMid) {
++                                    if region.label == "Table" {
+                                         tableFragments[index, default: []].append(fragment)
+-                                        shouldDropText = true
+-                                    }
+-                                } else if region.label == "Picture" || region.label == "Figure" || region.label == "Formula" {
+-                                    // 高度確定是圖片內部的「非主要文字」才排除 (intersection > 0.9)
+-                                    // 否則極可能是靠近圖片的 caption 或正文，寧可保留
+-                                    if ratio > 0.90 {
+-                                        shouldDropText = true
+-                                        break
+                                     }
++                                    handledByVisualRegion = true
++                                    break
+                                 }
+                             }
+                         }
+-                        if shouldDropText { continue }
++                        if handledByVisualRegion { continue }
+                         
+                         textFragments.append(fragment)
+                     }
+@@ -358,6 +345,19 @@ class BatchProcessor: ObservableObject {
+                 
+                 // Semantic classification is now handled directly via LayoutEngine mapping from D4LA labels
+                 
++                // 🛡️ 啟發式標題升級 (Heading Promotion) V2：極簡安全版
++                for i in 0..<paragraphs.count {
++                    if paragraphs[i].role == .body {
++                        let text = paragraphs[i].unifiedText.trimmingCharacters(in: .whitespacesAndNewlines)
++                        // [V2 Patch] 移除字體大小判斷，只依賴絕對準確的正則表達式，徹底消滅 False Positive
++                        let isChapter = text.lowercased().hasPrefix("chapter ") || (text.contains("第") && text.contains("章"))
++                        
++                        if isChapter {
++                            paragraphs[i].role = .title
++                        }
++                    }
++                }
++                
+                 
+                 // 📊 日誌輸出
+                 let roleBreakdown = Dictionary(grouping: paragraphs, by: { $0.role })
+@@ -372,42 +372,57 @@ class BatchProcessor: ObservableObject {
+                 // STAGE 6: 組裝 Markdown 與智慧分章
+                 // ═══════════════════════════════════════════
+                 
+-                                // 📖 智慧分章
++                var pageMD = ""
++                var rawTextForLLM = ""
++                
++                // 文字段落 → Markdown
++                for block in paragraphs {
++                    if LayoutEngine.shouldDrop(block: block, pageHeight: scaledSize.height) { continue }
++                    
++                    // 📖 擷取文件標題
++                    if block.role == .title {
++                        let titleText = block.unifiedText.trimmingCharacters(in: .whitespacesAndNewlines)
++                        if detectedTitle == nil {
++                            detectedTitle = titleText
++                            continue
++                        } else if detectedTitle == titleText {
++                            continue
++                        }
++                    }
++                    
++                    let htmlStr = LayoutEngine.toHTML(block: block, baseFontSize: styleRegistry.bodyFontSize)
++                    if !htmlStr.isEmpty {
++                        rawTextForLLM += htmlStr
++                    }
++                }
++                
++                if !rawTextForLLM.isEmpty {
++                    pageMD += rawTextForLLM
++                }
++                
++                // 📖 智慧分章
+                 if pageIndex > 0 {
+-                    if let firstBlock = paragraphs.first(where: { _ in true }),
++                    if let firstBlock = paragraphs.first(where: { !LayoutEngine.shouldDrop(block: $0, pageHeight: scaledSize.height) }),
+                        firstBlock.role == .title || firstBlock.role == .heading {
+                         
+                         let text = firstBlock.unifiedText.lowercased()
+                         let isChapterRegex = text.contains("chapter") || text.contains("第")
+                         let isH1 = (firstBlock.fragments.first?.fontSize ?? 0) >= styleRegistry.h1FontSize * 0.95
+                         
++                        // 根據角色、正規表示式、或字體大小判定是否為章節起點
+                         if firstBlock.role == .title || isChapterRegex || isH1 {
+-                            documentStream.append(.chapterSplit)
++                            fullHTML += "<!-- CHAPTER_SPLIT -->\n\n"
+                         } else if firstBlock.bounds.minY < 100 * scale {
+-                            documentStream.append(.chapterSplit)
++                            // 備用：位於頁面最頂端的 heading 也可能是一個章節
++                            fullHTML += "<!-- CHAPTER_SPLIT -->\n\n"
+                         }
+                     } else if pageIndex % 15 == 0 {
+-                        documentStream.append(.chapterSplit)
++                        // 備用防呆
++                        fullHTML += "<!-- CHAPTER_SPLIT -->\n\n"
+                     }
+                 }
+                 
+-                documentStream.append(.pageMarker(index: pageIndex + 1, pageHeight: scaledSize.height))
+-                
+-                // 文字段落
+-                for block in paragraphs {
+-                    
+-                    
+-                    if block.role == .title {
+-                        let titleText = block.unifiedText.trimmingCharacters(in: .whitespacesAndNewlines)
+-                        if detectedTitle == nil {
+-                            detectedTitle = titleText
+-                        } else if detectedTitle == titleText {
+-                            continue
+-                        }
+-                    }
+-                    
+-                    documentStream.append(.block(block))
+-                }
++                fullHTML += pageMD + "\n\n"
+                 
+                 // 🧹 即時釋放記憶體
+                 rawImage = nil
+@@ -423,28 +438,13 @@ class BatchProcessor: ObservableObject {
+             
+             // 執行跨頁段落無縫續接 (縫合被換頁切斷的句子)
+             AppLogger.shared.info("開始執行跨頁段落縫合...")
+-            let cleanedStream = LayoutEngine.removeDocumentLevelHeadersAndFooters(documentStream)
+-            let stitchedStream = LayoutEngine.stitchCrossPageElements(cleanedStream)
+-            
+-            for element in stitchedStream {
+-                switch element {
+-                case .block(let block):
+-                    let htmlStr = LayoutEngine.toHTML(block: block, baseFontSize: styleRegistry.bodyFontSize)
+-                    if !htmlStr.isEmpty {
+-                        fullHTML += htmlStr + "\n\n"
+-                    }
+-                case .pageMarker(let index, _):
+-                    fullHTML += "<!-- PAGE: \(index) -->\n"
+-                case .chapterSplit:
+-                    fullHTML += "<!-- CHAPTER_SPLIT -->\n\n"
+-                }
+-            }
++            fullHTML = LayoutEngine.stitchCrossPageParagraphs(html: fullHTML)
+             
+             // 📖 決定最終書名：PDF 元資料 → 第一個 .title 區塊 → 預設名稱
+             let bookTitle = detectedTitle ?? "Libri-AI_轉譯報告"
+             
+             // 在 HTML 最前面插入書名標題 (只有一份，不會重複)
+-            // Duplicate title injection removed
++            fullHTML = "<h1 class=\"doc-title\">\(bookTitle)</h1>\n\n" + fullHTML
+             
+             // 安全檔名：移除不安全字元
+             let safeFileName = bookTitle.replacingOccurrences(of: "/", with: "_")

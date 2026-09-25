@@ -31,7 +31,7 @@ class ContentViewModel: ObservableObject {
     @Published var pdfDocument: PDFDocument? = nil
     @Published var animState: AnimationState = .idle
     @Published var currentThumbnail: UIImage? = nil
-    @Published var dynamicIslandCenter: CGPoint = .zero
+
     
     // MARK: - Combine: Forward nested ObservableObject changes
     private var cancellables = Set<AnyCancellable>()

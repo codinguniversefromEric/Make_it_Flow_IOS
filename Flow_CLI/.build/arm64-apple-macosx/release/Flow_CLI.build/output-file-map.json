@@ -1,0 +1,91 @@
+{
+  "": {
+    "dependencies": "/Users/giyoshimiken/Documents/Make_it_Flow_IOS/Flow_CLI/.build/arm64-apple-macosx/release/Flow_CLI.build/Flow_CLI.d",
+    "object": "/Users/giyoshimiken/Documents/Make_it_Flow_IOS/Flow_CLI/.build/arm64-apple-macosx/release/Flow_CLI.build/Flow_CLI.o",
+    "swift-dependencies": "/Users/giyoshimiken/Documents/Make_it_Flow_IOS/Flow_CLI/.build/arm64-apple-macosx/release/Flow_CLI.build/master.swiftdeps"
+  },
+  "/Users/giyoshimiken/Documents/Make_it_Flow_IOS/Flow_CLI/Sources/Flow_CLI/AppLogger.swift": {
+    "object": "/Users/giyoshimiken/Documents/Make_it_Flow_IOS/Flow_CLI/.build/arm64-apple-macosx/release/Flow_CLI.build/AppLogger.swift.o",
+    "swiftmodule": "/Users/giyoshimiken/Documents/Make_it_Flow_IOS/Flow_CLI/.build/arm64-apple-macosx/release/Flow_CLI.build/AppLogger~partial.swiftmodule",
+    "swift-dependencies": "/Users/giyoshimiken/Documents/Make_it_Flow_IOS/Flow_CLI/.build/arm64-apple-macosx/release/Flow_CLI.build/AppLogger.swiftdeps",
+    "diagnostics": "/Users/giyoshimiken/Documents/Make_it_Flow_IOS/Flow_CLI/.build/arm64-apple-macosx/release/Flow_CLI.build/AppLogger.dia"
+  },
+  "/Users/giyoshimiken/Documents/Make_it_Flow_IOS/Flow_CLI/Sources/Flow_CLI/AppSettings.swift": {
+    "object": "/Users/giyoshimiken/Documents/Make_it_Flow_IOS/Flow_CLI/.build/arm64-apple-macosx/release/Flow_CLI.build/AppSettings.swift.o",
+    "swiftmodule": "/Users/giyoshimiken/Documents/Make_it_Flow_IOS/Flow_CLI/.build/arm64-apple-macosx/release/Flow_CLI.build/AppSettings~partial.swiftmodule",
+    "swift-dependencies": "/Users/giyoshimiken/Documents/Make_it_Flow_IOS/Flow_CLI/.build/arm64-apple-macosx/release/Flow_CLI.build/AppSettings.swiftdeps",
+    "diagnostics": "/Users/giyoshimiken/Documents/Make_it_Flow_IOS/Flow_CLI/.build/arm64-apple-macosx/release/Flow_CLI.build/AppSettings.dia"
+  },
+  "/Users/giyoshimiken/Documents/Make_it_Flow_IOS/Flow_CLI/Sources/Flow_CLI/BatchProcessor.swift": {
+    "object": "/Users/giyoshimiken/Documents/Make_it_Flow_IOS/Flow_CLI/.build/arm64-apple-macosx/release/Flow_CLI.build/BatchProcessor.swift.o",
+    "swiftmodule": "/Users/giyoshimiken/Documents/Make_it_Flow_IOS/Flow_CLI/.build/arm64-apple-macosx/release/Flow_CLI.build/BatchProcessor~partial.swiftmodule",
+    "swift-dependencies": "/Users/giyoshimiken/Documents/Make_it_Flow_IOS/Flow_CLI/.build/arm64-apple-macosx/release/Flow_CLI.build/BatchProcessor.swiftdeps",
+    "diagnostics": "/Users/giyoshimiken/Documents/Make_it_Flow_IOS/Flow_CLI/.build/arm64-apple-macosx/release/Flow_CLI.build/BatchProcessor.dia"
+  },
+  "/Users/giyoshimiken/Documents/Make_it_Flow_IOS/Flow_CLI/Sources/Flow_CLI/CrossPlatformUI.swift": {
+    "object": "/Users/giyoshimiken/Documents/Make_it_Flow_IOS/Flow_CLI/.build/arm64-apple-macosx/release/Flow_CLI.build/CrossPlatformUI.swift.o",
+    "swiftmodule": "/Users/giyoshimiken/Documents/Make_it_Flow_IOS/Flow_CLI/.build/arm64-apple-macosx/release/Flow_CLI.build/CrossPlatformUI~partial.swiftmodule",
+    "swift-dependencies": "/Users/giyoshimiken/Documents/Make_it_Flow_IOS/Flow_CLI/.build/arm64-apple-macosx/release/Flow_CLI.build/CrossPlatformUI.swiftdeps",
+    "diagnostics": "/Users/giyoshimiken/Documents/Make_it_Flow_IOS/Flow_CLI/.build/arm64-apple-macosx/release/Flow_CLI.build/CrossPlatformUI.dia"
+  },
+  "/Users/giyoshimiken/Documents/Make_it_Flow_IOS/Flow_CLI/Sources/Flow_CLI/EPUBSynthesizer.swift": {
+    "object": "/Users/giyoshimiken/Documents/Make_it_Flow_IOS/Flow_CLI/.build/arm64-apple-macosx/release/Flow_CLI.build/EPUBSynthesizer.swift.o",
+    "swiftmodule": "/Users/giyoshimiken/Documents/Make_it_Flow_IOS/Flow_CLI/.build/arm64-apple-macosx/release/Flow_CLI.build/EPUBSynthesizer~partial.swiftmodule",
+    "swift-dependencies": "/Users/giyoshimiken/Documents/Make_it_Flow_IOS/Flow_CLI/.build/arm64-apple-macosx/release/Flow_CLI.build/EPUBSynthesizer.swiftdeps",
+    "diagnostics": "/Users/giyoshimiken/Documents/Make_it_Flow_IOS/Flow_CLI/.build/arm64-apple-macosx/release/Flow_CLI.build/EPUBSynthesizer.dia"
+  },
+  "/Users/giyoshimiken/Documents/Make_it_Flow_IOS/Flow_CLI/Sources/Flow_CLI/LayoutEngine.swift": {
+    "object": "/Users/giyoshimiken/Documents/Make_it_Flow_IOS/Flow_CLI/.build/arm64-apple-macosx/release/Flow_CLI.build/LayoutEngine.swift.o",
+    "swiftmodule": "/Users/giyoshimiken/Documents/Make_it_Flow_IOS/Flow_CLI/.build/arm64-apple-macosx/release/Flow_CLI.build/LayoutEngine~partial.swiftmodule",
+    "swift-dependencies": "/Users/giyoshimiken/Documents/Make_it_Flow_IOS/Flow_CLI/.build/arm64-apple-macosx/release/Flow_CLI.build/LayoutEngine.swiftdeps",
+    "diagnostics": "/Users/giyoshimiken/Documents/Make_it_Flow_IOS/Flow_CLI/.build/arm64-apple-macosx/release/Flow_CLI.build/LayoutEngine.dia"
+  },
+  "/Users/giyoshimiken/Documents/Make_it_Flow_IOS/Flow_CLI/Sources/Flow_CLI/LiveActivityManager.swift": {
+    "object": "/Users/giyoshimiken/Documents/Make_it_Flow_IOS/Flow_CLI/.build/arm64-apple-macosx/release/Flow_CLI.build/LiveActivityManager.swift.o",
+    "swiftmodule": "/Users/giyoshimiken/Documents/Make_it_Flow_IOS/Flow_CLI/.build/arm64-apple-macosx/release/Flow_CLI.build/LiveActivityManager~partial.swiftmodule",
+    "swift-dependencies": "/Users/giyoshimiken/Documents/Make_it_Flow_IOS/Flow_CLI/.build/arm64-apple-macosx/release/Flow_CLI.build/LiveActivityManager.swiftdeps",
+    "diagnostics": "/Users/giyoshimiken/Documents/Make_it_Flow_IOS/Flow_CLI/.build/arm64-apple-macosx/release/Flow_CLI.build/LiveActivityManager.dia"
+  },
+  "/Users/giyoshimiken/Documents/Make_it_Flow_IOS/Flow_CLI/Sources/Flow_CLI/MemoryManager.swift": {
+    "object": "/Users/giyoshimiken/Documents/Make_it_Flow_IOS/Flow_CLI/.build/arm64-apple-macosx/release/Flow_CLI.build/MemoryManager.swift.o",
+    "swiftmodule": "/Users/giyoshimiken/Documents/Make_it_Flow_IOS/Flow_CLI/.build/arm64-apple-macosx/release/Flow_CLI.build/MemoryManager~partial.swiftmodule",
+    "swift-dependencies": "/Users/giyoshimiken/Documents/Make_it_Flow_IOS/Flow_CLI/.build/arm64-apple-macosx/release/Flow_CLI.build/MemoryManager.swiftdeps",
+    "diagnostics": "/Users/giyoshimiken/Documents/Make_it_Flow_IOS/Flow_CLI/.build/arm64-apple-macosx/release/Flow_CLI.build/MemoryManager.dia"
+  },
+  "/Users/giyoshimiken/Documents/Make_it_Flow_IOS/Flow_CLI/Sources/Flow_CLI/StyleRegistry.swift": {
+    "object": "/Users/giyoshimiken/Documents/Make_it_Flow_IOS/Flow_CLI/.build/arm64-apple-macosx/release/Flow_CLI.build/StyleRegistry.swift.o",
+    "swiftmodule": "/Users/giyoshimiken/Documents/Make_it_Flow_IOS/Flow_CLI/.build/arm64-apple-macosx/release/Flow_CLI.build/StyleRegistry~partial.swiftmodule",
+    "swift-dependencies": "/Users/giyoshimiken/Documents/Make_it_Flow_IOS/Flow_CLI/.build/arm64-apple-macosx/release/Flow_CLI.build/StyleRegistry.swiftdeps",
+    "diagnostics": "/Users/giyoshimiken/Documents/Make_it_Flow_IOS/Flow_CLI/.build/arm64-apple-macosx/release/Flow_CLI.build/StyleRegistry.dia"
+  },
+  "/Users/giyoshimiken/Documents/Make_it_Flow_IOS/Flow_CLI/Sources/Flow_CLI/TableReconstructor.swift": {
+    "object": "/Users/giyoshimiken/Documents/Make_it_Flow_IOS/Flow_CLI/.build/arm64-apple-macosx/release/Flow_CLI.build/TableReconstructor.swift.o",
+    "swiftmodule": "/Users/giyoshimiken/Documents/Make_it_Flow_IOS/Flow_CLI/.build/arm64-apple-macosx/release/Flow_CLI.build/TableReconstructor~partial.swiftmodule",
+    "swift-dependencies": "/Users/giyoshimiken/Documents/Make_it_Flow_IOS/Flow_CLI/.build/arm64-apple-macosx/release/Flow_CLI.build/TableReconstructor.swiftdeps",
+    "diagnostics": "/Users/giyoshimiken/Documents/Make_it_Flow_IOS/Flow_CLI/.build/arm64-apple-macosx/release/Flow_CLI.build/TableReconstructor.dia"
+  },
+  "/Users/giyoshimiken/Documents/Make_it_Flow_IOS/Flow_CLI/Sources/Flow_CLI/TextFragment.swift": {
+    "object": "/Users/giyoshimiken/Documents/Make_it_Flow_IOS/Flow_CLI/.build/arm64-apple-macosx/release/Flow_CLI.build/TextFragment.swift.o",
+    "swiftmodule": "/Users/giyoshimiken/Documents/Make_it_Flow_IOS/Flow_CLI/.build/arm64-apple-macosx/release/Flow_CLI.build/TextFragment~partial.swiftmodule",
+    "swift-dependencies": "/Users/giyoshimiken/Documents/Make_it_Flow_IOS/Flow_CLI/.build/arm64-apple-macosx/release/Flow_CLI.build/TextFragment.swiftdeps",
+    "diagnostics": "/Users/giyoshimiken/Documents/Make_it_Flow_IOS/Flow_CLI/.build/arm64-apple-macosx/release/Flow_CLI.build/TextFragment.dia"
+  },
+  "/Users/giyoshimiken/Documents/Make_it_Flow_IOS/Flow_CLI/Sources/Flow_CLI/VisionEngine.swift": {
+    "object": "/Users/giyoshimiken/Documents/Make_it_Flow_IOS/Flow_CLI/.build/arm64-apple-macosx/release/Flow_CLI.build/VisionEngine.swift.o",
+    "swiftmodule": "/Users/giyoshimiken/Documents/Make_it_Flow_IOS/Flow_CLI/.build/arm64-apple-macosx/release/Flow_CLI.build/VisionEngine~partial.swiftmodule",
+    "swift-dependencies": "/Users/giyoshimiken/Documents/Make_it_Flow_IOS/Flow_CLI/.build/arm64-apple-macosx/release/Flow_CLI.build/VisionEngine.swiftdeps",
+    "diagnostics": "/Users/giyoshimiken/Documents/Make_it_Flow_IOS/Flow_CLI/.build/arm64-apple-macosx/release/Flow_CLI.build/VisionEngine.dia"
+  },
+  "/Users/giyoshimiken/Documents/Make_it_Flow_IOS/Flow_CLI/Sources/Flow_CLI/main.swift": {
+    "object": "/Users/giyoshimiken/Documents/Make_it_Flow_IOS/Flow_CLI/.build/arm64-apple-macosx/release/Flow_CLI.build/main.swift.o",
+    "swiftmodule": "/Users/giyoshimiken/Documents/Make_it_Flow_IOS/Flow_CLI/.build/arm64-apple-macosx/release/Flow_CLI.build/main~partial.swiftmodule",
+    "swift-dependencies": "/Users/giyoshimiken/Documents/Make_it_Flow_IOS/Flow_CLI/.build/arm64-apple-macosx/release/Flow_CLI.build/main.swiftdeps",
+    "diagnostics": "/Users/giyoshimiken/Documents/Make_it_Flow_IOS/Flow_CLI/.build/arm64-apple-macosx/release/Flow_CLI.build/main.dia"
+  },
+  "/Users/giyoshimiken/Documents/Make_it_Flow_IOS/Flow_CLI/.build/arm64-apple-macosx/release/Flow_CLI.build/DerivedSources/resource_bundle_accessor.swift": {
+    "object": "/Users/giyoshimiken/Documents/Make_it_Flow_IOS/Flow_CLI/.build/arm64-apple-macosx/release/Flow_CLI.build/resource_bundle_accessor.swift.o",
+    "swiftmodule": "/Users/giyoshimiken/Documents/Make_it_Flow_IOS/Flow_CLI/.build/arm64-apple-macosx/release/Flow_CLI.build/resource_bundle_accessor~partial.swiftmodule",
+    "swift-dependencies": "/Users/giyoshimiken/Documents/Make_it_Flow_IOS/Flow_CLI/.build/arm64-apple-macosx/release/Flow_CLI.build/resource_bundle_accessor.swiftdeps",
+    "diagnostics": "/Users/giyoshimiken/Documents/Make_it_Flow_IOS/Flow_CLI/.build/arm64-apple-macosx/release/Flow_CLI.build/resource_bundle_accessor.dia"
+  }
+}

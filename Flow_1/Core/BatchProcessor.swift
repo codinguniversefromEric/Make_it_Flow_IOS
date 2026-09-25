@@ -305,6 +305,39 @@ class BatchProcessor: ObservableObject {
                         textFragments.append(fragment)
                     }
                 }
+                // ═══════════════════════════════════════════
+                // STAGE 2.1: 去除重疊的重複碎片 (Faux Bold / Shadow 處理)
+                // ═══════════════════════════════════════════
+                var dedupedFragments: [TextFragment] = []
+                for frag in textFragments {
+                    var isDuplicate = false
+                    // 往前找，檢查是否有重疊的重複字
+                    for i in stride(from: dedupedFragments.count - 1, through: 0, by: -1) {
+                        let existing = dedupedFragments[i]
+                        let intersection = existing.bounds.intersection(frag.bounds)
+                        
+                        if !intersection.isNull {
+                            let minArea = min(existing.bounds.width * existing.bounds.height, frag.bounds.width * frag.bounds.height)
+                            let interArea = intersection.width * intersection.height
+                            
+                            // 如果重疊面積超過較小碎片的 50%，且文字相同或被包含
+                            if minArea > 0 && (interArea / minArea) > 0.5 {
+                                if existing.text.contains(frag.text) || frag.text.contains(existing.text) {
+                                    // 保留較長的文字 (避免 "牌" 和 ""牌" 被錯誤切斷)
+                                    if frag.text.count > existing.text.count {
+                                        dedupedFragments[i] = frag
+                                    }
+                                    isDuplicate = true
+                                    break
+                                }
+                            }
+                        }
+                    }
+                    if !isDuplicate {
+                        dedupedFragments.append(frag)
+                    }
+                }
+                textFragments = dedupedFragments
                 
                 // OCR Fallback and extra logics removed for YOLO 99% accuracy transition
                 
@@ -356,11 +389,37 @@ class BatchProcessor: ObservableObject {
                 for i in 0..<paragraphs.count {
                     if paragraphs[i].role == .body {
                         let text = paragraphs[i].unifiedText.trimmingCharacters(in: .whitespacesAndNewlines)
-                        // [V2 Patch] 移除字體大小判斷，只依賴絕對準確的正則表達式，徹底消滅 False Positive
-                        let isChapter = text.lowercased().hasPrefix("chapter ") || (text.contains("第") && text.contains("章"))
+                        // [V2 Patch] 升級為嚴格正則表達式，避免長篇內文剛好包含「第」和「章」就被誤判
+                        let isChapter = text.range(of: "^第[一二三四五六七八九十百千萬萬0-9\\s]+章|^chapter\\s+\\d+", options: [.regularExpression, .caseInsensitive]) != nil && text.count < 60
                         
                         if isChapter {
                             paragraphs[i].role = .title
+                        }
+                    }
+                }
+                
+                // 🛡️ 啟發式標題降級 (Heading Downgrade)：修正 YOLO 錯誤將內文分類為標題
+                for i in 0..<paragraphs.count {
+                    let role = paragraphs[i].role
+                    if role == .heading || role == .title {
+                        let text = paragraphs[i].unifiedText.trimmingCharacters(in: .whitespacesAndNewlines)
+                        
+                        let isTooLong = text.count > 100
+                        
+                        // 避免將 "1.1" 這種合法的標題結尾點誤判，加上長度 > 15 的限制
+                        let endsWithPunctuation = text.range(of: "[.!?。！？]$", options: .regularExpression) != nil && text.count > 15
+                        
+                        // 計算句子數量 (依據句號出現次數)
+                        let sentenceCount = text.components(separatedBy: ".").count - 1 +
+                                            text.components(separatedBy: "。").count - 1
+                        let isMultiSentence = sentenceCount >= 2
+                        
+                        if isTooLong || endsWithPunctuation || isMultiSentence {
+                            // 例外保留真正的 Chapter 標題
+                            let isChapter = text.range(of: "^第[一二三四五六七八九十百千萬萬0-9\\s]+章|^chapter\\s+\\d+", options: [.regularExpression, .caseInsensitive]) != nil && text.count < 60
+                            if !isChapter {
+                                paragraphs[i].role = .body
+                            }
                         }
                     }
                 }

@@ -1,0 +1,196 @@
+diff --git a/Flow_1/Core/BatchProcessor.swift b/Flow_1/Core/BatchProcessor.swift
+index a4c3146..2d120e6 100644
+--- a/Flow_1/Core/BatchProcessor.swift
++++ b/Flow_1/Core/BatchProcessor.swift
+@@ -50,8 +50,8 @@ class BatchProcessor: ObservableObject {
+     @MainActor
+     func exportDocument(_ document: PDFDocument, fileName: String? = nil) async {
+         // 向系統申請背景執行權限，確保關閉螢幕或退到背景時轉檔與動態島繼續運作 (Issue: 背景凍結)
+-        var bgTaskID: UIBackgroundTaskIdentifier = .invalid
+ #if os(iOS)
++        var bgTaskID: UIBackgroundTaskIdentifier = .invalid
+         bgTaskID = UIApplication.shared.beginBackgroundTask(withName: "PDF_Export_Task") {
+             UIApplication.shared.endBackgroundTask(bgTaskID)
+             bgTaskID = .invalid
+@@ -169,6 +169,15 @@ class BatchProcessor: ObservableObject {
+                 
+                 guard let validCGImg = cgImg, let validRawImage = rawImage else { continue }
+                 
++                // --- 封面擷取 (第 1 頁) ---
++                if pageIndex == 0 {
++                    if let imageData = validRawImage.appJPEGData(compressionQuality: 0.85) {
++                        let fileURL = assetsDir.appendingPathComponent("cover.jpg")
++                        try? imageData.write(to: fileURL)
++                        AppLogger.shared.info("🖼️ 成功儲存封面圖片 cover.jpg")
++                    }
++                }
++                
+                 // ═══════════════════════════════════════════
+                 // STAGE 1: YOLO 視覺區域偵測 (圖片/表格/公式)
+                 // ═══════════════════════════════════════════
+@@ -222,8 +231,8 @@ class BatchProcessor: ObservableObject {
+                         
+                         let pRect = line.bounds(for: page)
+                         let displayRect = CGRect(
+-                            x: pRect.minX * scale,
+-                            y: (pageBounds.height - pRect.maxY) * scale,
++                            x: (pRect.minX - pageBounds.minX) * scale,
++                            y: (pageBounds.maxY - pRect.maxY) * scale,
+                             width: pRect.width * scale,
+                             height: pRect.height * scale
+                         )
+@@ -263,28 +272,33 @@ class BatchProcessor: ObservableObject {
+                             colorHex: colorHex
+                         )
+                         
+-                        // 🔍 排除落在視覺區域 (圖片/表格/公式) 內的文字行，但保留表格內的碎片用於結構重建
+-                        var handledByVisualRegion = false
++                        // 🔍 判斷文字行是否落在視覺區域內，避免刪除 caption 或附近的正文
++                        var shouldDropText = false
+                         let lineArea = displayRect.width * displayRect.height
+                         
+                         for (index, region) in visualRegions.enumerated() {
+                             let intersection = region.rect.intersection(displayRect)
+                             if !intersection.isNull {
+                                 let intersectionArea = intersection.width * intersection.height
+-                                // 如果重疊面積超過文字行面積的 40%，或者文字中心點落在擴大一點的區域內
+-                                let expandedRegion = region.rect.insetBy(dx: -5, dy: -5)
+-                                let lineMid = CGPoint(x: displayRect.midX, y: displayRect.midY)
++                                let ratio = lineArea > 0 ? (intersectionArea / lineArea) : 0
+                                 
+-                                if (lineArea > 0 && intersectionArea / lineArea > 0.4) || expandedRegion.contains(lineMid) {
+-                                    if region.label == "Table" {
++                                if region.label == "Table" {
++                                    // Table: 保留用於 table reconstruction，不強制從主流程刪除 (改為從主流程刪除，依照使用者要求)
++                                    if ratio > 0.4 || region.rect.insetBy(dx: -5, dy: -5).contains(CGPoint(x: displayRect.midX, y: displayRect.midY)) {
+                                         tableFragments[index, default: []].append(fragment)
++                                        shouldDropText = true
++                                    }
++                                } else if region.label == "Picture" || region.label == "Figure" || region.label == "Formula" {
++                                    // 高度確定是圖片內部的「非主要文字」才排除 (intersection > 0.9)
++                                    // 否則極可能是靠近圖片的 caption 或正文，寧可保留
++                                    if ratio > 0.90 {
++                                        shouldDropText = true
++                                        break
+                                     }
+-                                    handledByVisualRegion = true
+-                                    break
+                                 }
+                             }
+                         }
+-                        if handledByVisualRegion { continue }
++                        if shouldDropText { continue }
+                         
+                         textFragments.append(fragment)
+                     }
+@@ -355,14 +369,13 @@ class BatchProcessor: ObservableObject {
+                 
+                 // 文字段落 → Markdown
+                 for block in paragraphs {
+-                    if LayoutEngine.shouldDrop(block.role) { continue }
++                    if LayoutEngine.shouldDrop(block: block, pageHeight: scaledSize.height) { continue }
+                     
+                     // 📖 擷取文件標題
+                     if block.role == .title {
+                         let titleText = block.unifiedText.trimmingCharacters(in: .whitespacesAndNewlines)
+                         if detectedTitle == nil {
+                             detectedTitle = titleText
+-                            continue
+                         } else if detectedTitle == titleText {
+                             continue
+                         }
+@@ -380,7 +393,7 @@ class BatchProcessor: ObservableObject {
+                 
+                 // 📖 智慧分章
+                 if pageIndex > 0 {
+-                    if let firstBlock = paragraphs.first(where: { !LayoutEngine.shouldDrop($0.role) }),
++                    if let firstBlock = paragraphs.first(where: { !LayoutEngine.shouldDrop(block: $0, pageHeight: scaledSize.height) }),
+                        firstBlock.role == .title || firstBlock.role == .heading {
+                         
+                         let text = firstBlock.unifiedText.lowercased()
+@@ -400,6 +413,8 @@ class BatchProcessor: ObservableObject {
+                     }
+                 }
+                 
++                // 為了 evaluation/regression 測試的 page provenance，注入 page marker
++                fullHTML += "<!-- PAGE: \(pageIndex + 1) -->\n"
+                 fullHTML += pageMD + "\n\n"
+                 
+                 // 🧹 即時釋放記憶體
+@@ -422,7 +437,7 @@ class BatchProcessor: ObservableObject {
+             let bookTitle = detectedTitle ?? "Libri-AI_轉譯報告"
+             
+             // 在 HTML 最前面插入書名標題 (只有一份，不會重複)
+-            fullHTML = "<h1 class=\"doc-title\">\(bookTitle)</h1>\n\n" + fullHTML
++            // Duplicate title injection removed
+             
+             // 安全檔名：移除不安全字元
+             let safeFileName = bookTitle.replacingOccurrences(of: "/", with: "_")
+diff --git a/Flow_1/Engines/EPUBSynthesizer.swift b/Flow_1/Engines/EPUBSynthesizer.swift
+index 2e2a3ef..588f6d2 100644
+--- a/Flow_1/Engines/EPUBSynthesizer.swift
++++ b/Flow_1/Engines/EPUBSynthesizer.swift
+@@ -401,13 +401,26 @@ final class EPUBSynthesizer: Sendable {
+             
+             // 圖片資源清單
+             var imageManifest = ""
++            var hasCover = false
+             if fm.fileExists(atPath: assetsURL.path),
+                let images = try? fm.contentsOfDirectory(atPath: assetsURL.path) {
+                 for (index, image) in images.enumerated() where !image.hasPrefix(".") {
+-                    imageManifest += "<item id=\"img\(index)\" href=\"assets/\(image)\" media-type=\"image/png\"/>\n"
++                    let isJPG = image.lowercased().hasSuffix(".jpg") || image.lowercased().hasSuffix(".jpeg")
++                    let mediaType = isJPG ? "image/jpeg" : "image/png"
++                    let isCover = image == "cover.jpg"
++                    if isCover { hasCover = true }
++                    
++                    let id = isCover ? "cover-image" : "img\(index)"
++                    let properties = isCover ? " properties=\"cover-image\"" : ""
++                    imageManifest += "<item id=\"\(id)\" href=\"assets/\(image)\" media-type=\"\(mediaType)\"\(properties)/>\n"
+                 }
+             }
+             
++            if hasCover {
++                manifestItems = "<item id=\"cover\" href=\"cover.xhtml\" media-type=\"application/xhtml+xml\"/>\n" + manifestItems
++                spineItems = "<itemref idref=\"cover\"/>\n" + spineItems
++            }
++            
+             let contentOPF = """
+             <?xml version="1.0" encoding="UTF-8"?>
+             <package xmlns="http://www.idpf.org/2007/opf" version="3.0" unique-identifier="pub-id">
+@@ -415,6 +428,7 @@ final class EPUBSynthesizer: Sendable {
+                     <dc:title>\(sanitizeForXML(title))</dc:title>
+                     <dc:language>zh-TW</dc:language>
+                     <dc:identifier id="pub-id">urn:uuid:\(bookUUID)</dc:identifier>
++                    \(hasCover ? "<meta name=\"cover\" content=\"cover-image\"/>" : "")
+                 </metadata>
+                 <manifest>
+                     <item id="nav" href="nav.xhtml" media-type="application/xhtml+xml" properties="nav"/>
+@@ -439,6 +453,27 @@ final class EPUBSynthesizer: Sendable {
+             entries.append(EPUBArchiveEntry(path: "OEBPS/nav.xhtml", data: Data(navHTML.utf8)))
+             entries.append(EPUBArchiveEntry(path: "OEBPS/toc.ncx", data: Data(tocNCX.utf8)))
+             
++            if hasCover {
++                let coverHTML = """
++                <?xml version="1.0" encoding="utf-8"?>
++                <!DOCTYPE html>
++                <html xmlns="http://www.w3.org/1999/xhtml">
++                <head>
++                    <title>Cover</title>
++                    <meta charset="utf-8"/>
++                    <style>
++                        body { margin: 0; padding: 0; text-align: center; }
++                        img { max-width: 100%; max-height: 100vh; height: auto; }
++                    </style>
++                </head>
++                <body>
++                    <img src="assets/cover.jpg" alt="Cover"/>
++                </body>
++                </html>
++                """
++                entries.append(EPUBArchiveEntry(path: "OEBPS/cover.xhtml", data: Data(coverHTML.utf8)))
++            }
++            
+             // 章節 XHTML
+             for entry in chapterEntries {
+                 entries.append(entry)

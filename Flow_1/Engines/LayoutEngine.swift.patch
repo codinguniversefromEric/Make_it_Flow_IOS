@@ -1,0 +1,11 @@
+--- Flow_1/Engines/LayoutEngine.swift
++++ Flow_1/Engines/LayoutEngine.swift
+@@ -488,7 +488,7 @@
+     
+     /// 基於啟發式法則 (標點符號與大小寫) 自動縫合因 PDF 換頁而被強制截斷的段落
+     nonisolated static func stitchCrossPageParagraphs(html: String) -> String {
+-        let pattern = "([^.!?:;。！？：；>\”\"\''])\s*</span>\s*</p>\s*<p class=\"doc-body\">\s*(<span[^>]*>\s*[a-z0-9\p{Han}])"
++        let pattern = "([^.!?:;。！？：；>\\”\\\"\\\''])\\s*</span>\\s*</p>\\s*<p class=\\\"doc-body\\\">\\s*(<span[^>]*>\\s*[a-z0-9\\p{Han}])"
+         
+         guard let regex = try? NSRegularExpression(pattern: pattern, options: []) else {
+             return html

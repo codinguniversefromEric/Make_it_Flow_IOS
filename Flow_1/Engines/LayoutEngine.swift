@@ -73,7 +73,14 @@ enum LayoutEngine: Sendable {
         var finalParagraphs: [ParagraphBlock] = []
         for block in sortedBlocks {
             guard let frags = blockFragmentsMap[block.id], !frags.isEmpty else { continue }
-            let sortedFrags = frags.sorted { $0.bounds.minY < $1.bounds.minY }
+            let sortedFrags = frags.sorted { a, b in
+                let yA = round(a.bounds.midY / 10.0)
+                let yB = round(b.bounds.midY / 10.0)
+                if yA == yB {
+                    return a.bounds.minX < b.bounds.minX
+                }
+                return yA < yB
+            }
             let role = mapYoloLabelToRole(block.label)
             finalParagraphs.append(buildParagraphBlock(from: sortedFrags, role: role))
         }
@@ -81,7 +88,14 @@ enum LayoutEngine: Sendable {
         // 4. 對未被 YOLO 框選的碎片進行 fallback 處理，避免漏字
         if !unassignedFragments.isEmpty {
             // 按 Y 軸排序，然後用 proximity grouping 組裝成段落
-            let ySortedOrphans = unassignedFragments.sorted { $0.bounds.minY < $1.bounds.minY }
+            let ySortedOrphans = unassignedFragments.sorted { a, b in
+                let yA = round(a.bounds.midY / 10.0)
+                let yB = round(b.bounds.midY / 10.0)
+                if yA == yB {
+                    return a.bounds.minX < b.bounds.minX
+                }
+                return yA < yB
+            }
             var currentGroup: [TextFragment] = [ySortedOrphans[0]]
             
             for i in 1..<ySortedOrphans.count {
@@ -166,7 +180,14 @@ enum LayoutEngine: Sendable {
             if !currentColumn.isEmpty { columns.append(currentColumn) }
             
             for col in columns {
-                let ySortedCol = col.sorted { $0.bounds.minY < $1.bounds.minY }
+                let ySortedCol = col.sorted { a, b in
+                    let yA = round(a.bounds.midY / 15.0)
+                    let yB = round(b.bounds.midY / 15.0)
+                    if yA == yB {
+                        return a.bounds.minX < b.bounds.minX
+                    }
+                    return yA < yB
+                }
                 finalSorted.append(contentsOf: ySortedCol)
             }
         }

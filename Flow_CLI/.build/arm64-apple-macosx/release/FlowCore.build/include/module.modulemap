@@ -1,0 +1,3 @@
+module FlowCore {
+    header "/Users/giyoshimiken/Documents/Make_it_Flow_IOS/Flow_CLI/.build/arm64-apple-macosx/release/FlowCore.build/include/FlowCore-Swift.h"
+}
