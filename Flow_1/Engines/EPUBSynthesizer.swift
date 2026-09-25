@@ -362,9 +362,16 @@ final class EPUBSynthesizer: Sendable {
                 
                 // 📖 建構章節目錄 (含內部標題)
                 navLinks += "<li><a href=\"\(fileName)\">\(safeTitle)</a>\n"
-                if !tocEntries.isEmpty {
+                
+                var subEntries = tocEntries
+                if let firstEntry = subEntries.first, sanitizeForXML(firstEntry.text) == safeTitle {
+                    // 去除「標題雙胞胎」：如果第一個內建標題跟章節名稱一模一樣，就拔掉它
+                    subEntries.removeFirst()
+                }
+                
+                if !subEntries.isEmpty {
                     navLinks += "<ol>\n"
-                    navLinks += buildNavLinks(entries: tocEntries, xhtmlFile: fileName)
+                    navLinks += buildNavLinks(entries: subEntries, xhtmlFile: fileName)
                     navLinks += "</ol>\n"
                 }
                 navLinks += "</li>\n"

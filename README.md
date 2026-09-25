@@ -76,7 +76,7 @@ The project comes pre-packaged with three lightweight CoreML models based on [ha
 |-------|------------------------------------|-----------------------------|---------------|----------------------|
 | **YOLOv26 Nano** | **~0.05 seconds** | **~0.60** | **0.710** | Fast, battery-efficient. Good for standard text documents. |
 | **YOLOv26 Small** | **~0.05 seconds** | **~0.65** | **0.656** | Good balance of speed and precision for standard devices. |
-| **YOLOv26 Medium** (Default) | **~0.06 seconds** | **~0.68** | **0.612** | **Default**. Highest accuracy. Ideal for complex, multi-column academic papers with dense tables and charts. |
+| **YOLOv26 Medium** (Default) | **~0.06 seconds** | **~0.83** | **0.330** | **Default**. Highest accuracy. Ideal for complex, multi-column academic papers with dense tables and charts. |
 
 *Note: Benchmarks were measured on Apple Silicon (M-series) against the Hugging Face `marker_benchmark` dataset. The built-in Swift engine merges deep layout bounding boxes with native PDFKit data, generating accurate EPUB architectures orders of magnitude faster than Python-based alternatives.*
 
