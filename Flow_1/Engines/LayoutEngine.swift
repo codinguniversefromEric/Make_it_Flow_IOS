@@ -442,7 +442,6 @@ enum LayoutEngine: Sendable {
             // 使用相對比例 (em)，允許閱讀器自適應字體大小
             let safeBase = baseFontSize > 0 ? baseFontSize : 12.0
             let emSize = frag.fontSize / safeBase
-            let formattedEm = String(format: "%.2f", emSize)
             
             var style = ""
             // [V2 Patch] 只在字體大小有明顯變化時才寫入 inline font-size，避免 Apple Books 樣式失靈
