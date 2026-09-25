@@ -75,7 +75,7 @@ struct DebugPageView: View {
     private func renderPageWithAIAttention() async -> (UIImage?, String) {
         guard let page = document.page(at: pageIndex) else { return (nil, "載入頁面失敗") }
         
-        return await Task.detached(priority: .userInitiated) { () -> (UIImage?, String) in
+        return await Task.detached(priority: .utility) { () -> (UIImage?, String) in
             let pageBounds = page.bounds(for: .cropBox)
             let scale: CGFloat = 2.0
             let scaledSize = CGSize(width: pageBounds.width * scale, height: pageBounds.height * scale)
