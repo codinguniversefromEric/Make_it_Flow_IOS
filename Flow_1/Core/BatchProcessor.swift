@@ -387,15 +387,18 @@ class BatchProcessor: ObservableObject {
                 
                 // Semantic classification is now handled directly via LayoutEngine mapping from D4LA labels
                 
-                // 🛡️ 啟發式標題升級 (Heading Promotion) V2：極簡安全版
+                // 🛡️ 啟發式標題升級 (Heading Promotion) V2：支援專題報告與學術論文格式
                 for i in 0..<paragraphs.count {
                     if paragraphs[i].role == .body {
                         let text = paragraphs[i].unifiedText.trimmingCharacters(in: .whitespacesAndNewlines)
-                        // [V2 Patch] 升級為嚴格正則表達式，避免長篇內文剛好包含「第」和「章」就被誤判
-                        let isChapter = text.range(of: "^第[一二三四五六七八九十百千萬萬0-9\\s]+章|^chapter\\s+\\d+", options: [.regularExpression, .caseInsensitive]) != nil && text.count < 60
                         
-                        if isChapter {
+                        let isMainChapter = text.range(of: "^第[一二三四五六七八九十百千萬萬0-9\\s]+[章部节]|^chapter\\s+\\d+|^[壹貳參肆伍陸柒捌玖拾]+\\s*、", options: [.regularExpression, .caseInsensitive]) != nil && text.count < 60
+                        let isSubHeading = text.range(of: "^[一二三四五六七八九十]+\\s*、", options: [.regularExpression, .caseInsensitive]) != nil && text.count < 60
+                        
+                        if isMainChapter {
                             paragraphs[i].role = .title
+                        } else if isSubHeading {
+                            paragraphs[i].role = .heading
                         }
                     }
                 }
@@ -417,9 +420,11 @@ class BatchProcessor: ObservableObject {
                         let isMultiSentence = sentenceCount >= 2
                         
                         if isTooLong || endsWithPunctuation || isMultiSentence {
-                            // 例外保留真正的 Chapter 標題
-                            let isChapter = text.range(of: "^第[一二三四五六七八九十百千萬萬0-9\\s]+章|^chapter\\s+\\d+", options: [.regularExpression, .caseInsensitive]) != nil && text.count < 60
-                            if !isChapter {
+                            // 例外保留真正的 Chapter 或報告標題
+                            let isMainChapter = text.range(of: "^第[一二三四五六七八九十百千萬萬0-9\\s]+[章部节]|^chapter\\s+\\d+|^[壹貳參肆伍陸柒捌玖拾]+\\s*、", options: [.regularExpression, .caseInsensitive]) != nil && text.count < 60
+                            let isSubHeading = text.range(of: "^[一二三四五六七八九十]+\\s*、", options: [.regularExpression, .caseInsensitive]) != nil && text.count < 60
+                            
+                            if !isMainChapter && !isSubHeading {
                                 paragraphs[i].role = .body
                             }
                         }
