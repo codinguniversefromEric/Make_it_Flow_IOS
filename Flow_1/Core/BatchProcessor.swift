@@ -479,11 +479,11 @@ class BatchProcessor: ObservableObject {
                        firstBlock.role == .title || firstBlock.role == .heading {
                         
                         let text = firstBlock.unifiedText.lowercased()
-                        let isChapterRegex = text.contains("chapter") || text.contains("第")
-                        let isH1 = (firstBlock.fragments.first?.fontSize ?? 0) >= styleRegistry.h1FontSize * 0.95
+                        let isChapterRegex = text.contains("chapter") || text.range(of: "^第[一二三四五六七八九十百千萬萬0-9\\s]+[章部节讲篇]", options: .regularExpression) != nil
                         
-                        // 根據角色、正規表示式、或字體大小判定是否為章節起點
-                        if firstBlock.role == .title || isChapterRegex || isH1 {
+                        // 根據嚴格的語意角色來判定是否為章節起點 (避免視覺 isH1 誤導)
+                        // 只有當它真正是 .title，或者明確符合章節的正則表達式時，才進行切割
+                        if firstBlock.role == .title || isChapterRegex {
                             fullHTML += "<!-- CHAPTER_SPLIT -->\n\n"
                         }
                     }
