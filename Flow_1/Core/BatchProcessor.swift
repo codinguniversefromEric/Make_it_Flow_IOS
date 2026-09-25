@@ -340,21 +340,33 @@ class BatchProcessor: ObservableObject {
                 textFragments = dedupedFragments
                 
                 // ═══════════════════════════════════════════
-                // STAGE 2.2: 滿版表格防禦 (目錄頁處理)
+                // STAGE 2.2: 目錄頁防禦 (TOC False Positive)
                 // ═══════════════════════════════════════════
-                // 如果 YOLO 框出的 Table 佔據了超過 50% 的頁面高度，極有可能是「目錄頁」或「超大資料表」。
-                // 這類滿版內容若轉為圖片，在手機螢幕上會縮小到完全無法閱讀。因此強制降級還原為純文字。
+                // YOLO 經常將排版工整的「目錄頁」誤認為表格。如果是真正的目錄，應該降級回純文字。
+                // 為了避免誤傷真正的「滿版數據表格」，我們改用「目錄關鍵字 + 佔地面積」進行雙重驗證。
                 var validVisualRegions: [VisualRegion] = []
                 for (index, region) in visualRegions.enumerated() {
                     var shouldKeep = true
-                    if region.label == "Table" {
-                        let isFullPage = region.rect.height > scaledSize.height * 0.5
-                        if isFullPage {
-                            if let frags = tableFragments[index] {
-                                textFragments.append(contentsOf: frags)
+                    if region.label == "Table", let frags = tableFragments[index] {
+                        var tocKeywordCount = 0
+                        
+                        for frag in frags {
+                            let text = frag.text.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
+                            // 目錄常見特徵詞
+                            if text.hasPrefix("chapter ") || text.hasPrefix("part ") || text.hasPrefix("section ") ||
+                               text.contains("contents") || text.contains("目錄") || text.contains("目录") ||
+                               text.range(of: "^第[一二三四五六七八九十百千萬萬0-9\\s]+章", options: .regularExpression) != nil ||
+                               text.contains("...") || text.contains("···") || text.contains("。。。") {
+                                tocKeywordCount += 1
                             }
+                        }
+                        
+                        let isLargeTable = region.rect.height > scaledSize.height * 0.3
+                        // 如果是較大的表格且包含多個目錄特徵，則判定為目錄
+                        if isLargeTable && tocKeywordCount >= 2 {
+                            textFragments.append(contentsOf: frags)
                             shouldKeep = false
-                            AppLogger.shared.info("🛡️ 防禦：滿版表格 (TOC) 已還原為純文字")
+                            AppLogger.shared.info("🛡️ 防禦：偵測為目錄頁 (TOC)，已還原為純文字")
                         }
                     }
                     if shouldKeep {
