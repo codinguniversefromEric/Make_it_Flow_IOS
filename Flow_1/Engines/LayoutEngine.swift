@@ -446,7 +446,12 @@ enum LayoutEngine: Sendable {
             
             var style = ""
             // [V2 Patch] 只在字體大小有明顯變化時才寫入 inline font-size，避免 Apple Books 樣式失靈
-            if abs(emSize - 1.0) > 0.15 {
+            // [V3 Patch] 標題本身已有 h1/h2 預設大小，避免再疊加極端的 em 導致破版
+            let maxEmSize: CGFloat = (block.role == .title || block.role == .heading) ? 1.0 : 2.5
+            let cappedEmSize = min(emSize, maxEmSize)
+            let formattedEm = String(format: "%.2f", cappedEmSize)
+            
+            if abs(cappedEmSize - 1.0) > 0.15 {
                 style += "font-size: \(formattedEm)em;"
             }
             

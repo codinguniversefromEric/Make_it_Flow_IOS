@@ -339,6 +339,30 @@ class BatchProcessor: ObservableObject {
                 }
                 textFragments = dedupedFragments
                 
+                // ═══════════════════════════════════════════
+                // STAGE 2.2: 滿版表格防禦 (目錄頁處理)
+                // ═══════════════════════════════════════════
+                // 如果 YOLO 框出的 Table 佔據了超過 50% 的頁面高度，極有可能是「目錄頁」或「超大資料表」。
+                // 這類滿版內容若轉為圖片，在手機螢幕上會縮小到完全無法閱讀。因此強制降級還原為純文字。
+                var validVisualRegions: [VisualRegion] = []
+                for (index, region) in visualRegions.enumerated() {
+                    var shouldKeep = true
+                    if region.label == "Table" {
+                        let isFullPage = region.rect.height > scaledSize.height * 0.5
+                        if isFullPage {
+                            if let frags = tableFragments[index] {
+                                textFragments.append(contentsOf: frags)
+                            }
+                            shouldKeep = false
+                            AppLogger.shared.info("🛡️ 防禦：滿版表格 (TOC) 已還原為純文字")
+                        }
+                    }
+                    if shouldKeep {
+                        validVisualRegions.append(region)
+                    }
+                }
+                visualRegions = validVisualRegions
+                
                 // OCR Fallback and extra logics removed for YOLO 99% accuracy transition
                 
                 // ═══════════════════════════════════════════
