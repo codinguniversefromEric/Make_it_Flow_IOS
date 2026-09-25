@@ -412,14 +412,20 @@ class BatchProcessor: ObservableObject {
                         let isTooLong = text.count > 100
                         
                         // 避免將 "1.1" 這種合法的標題結尾點誤判，加上長度 > 15 的限制
-                        let endsWithPunctuation = text.range(of: "[.!?。！？]$", options: .regularExpression) != nil && text.count > 15
+                        // 新增逗號與分號的判斷，真正的標題絕對不會以逗號或分號結尾
+                        let endsWithPunctuation = text.range(of: "[.!?。！？,，;；]$", options: .regularExpression) != nil && text.count > 15
                         
                         // 計算句子數量 (依據句號出現次數)
                         let sentenceCount = text.components(separatedBy: ".").count - 1 +
                                             text.components(separatedBy: "。").count - 1
                         let isMultiSentence = sentenceCount >= 2
                         
-                        if isTooLong || endsWithPunctuation || isMultiSentence {
+                        // 針對文獻參考 (References) 特徵進行強硬降級
+                        let isReferencePattern = text.range(of: "^\\[\\d+\\]", options: .regularExpression) != nil
+                        let isURL = text.lowercased().contains("http") || text.lowercased().contains("www.")
+                        let hasPipes = text.contains("｜") || text.contains("|")
+                        
+                        if isTooLong || endsWithPunctuation || isMultiSentence || isReferencePattern || isURL || hasPipes {
                             // 例外保留真正的 Chapter 或報告標題
                             let isMainChapter = text.range(of: "^第[一二三四五六七八九十百千萬萬0-9\\s]+[章部节]|^chapter\\s+\\d+|^[壹貳參肆伍陸柒捌玖拾]+\\s*、", options: [.regularExpression, .caseInsensitive]) != nil && text.count < 60
                             let isSubHeading = text.range(of: "^[一二三四五六七八九十]+\\s*、", options: [.regularExpression, .caseInsensitive]) != nil && text.count < 60
