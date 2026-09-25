@@ -352,18 +352,16 @@ class BatchProcessor: ObservableObject {
                         
                         for frag in frags {
                             let text = frag.text.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
-                            // 目錄常見特徵詞
-                            if text.hasPrefix("chapter ") || text.hasPrefix("part ") || text.hasPrefix("section ") ||
-                               text.contains("contents") || text.contains("目錄") || text.contains("目录") ||
-                               text.range(of: "^第[一二三四五六七八九十百千萬萬0-9\\s]+章", options: .regularExpression) != nil ||
-                               text.contains("...") || text.contains("···") || text.contains("。。。") {
+                            // 目錄常見特徵詞 (使用嚴格正則表達式避免誤傷資料表)
+                            let pattern = "^(chapter|part|section)\\s+[ivx0-9]+\\b|\\b(table of contents|contents|目錄|目录)\\b|^第[一二三四五六七八九十百千萬萬0-9\\s]+[章部节]|\\.{4,}|…{2,}"
+                            if text.range(of: pattern, options: .regularExpression) != nil {
                                 tocKeywordCount += 1
                             }
                         }
                         
                         let isLargeTable = region.rect.height > scaledSize.height * 0.3
-                        // 如果是較大的表格且包含多個目錄特徵，則判定為目錄
-                        if isLargeTable && tocKeywordCount >= 2 {
+                        // 如果是較大的表格且包含至少 1 個明確的目錄特徵，則判定為目錄
+                        if isLargeTable && tocKeywordCount >= 1 {
                             textFragments.append(contentsOf: frags)
                             shouldKeep = false
                             AppLogger.shared.info("🛡️ 防禦：偵測為目錄頁 (TOC)，已還原為純文字")
