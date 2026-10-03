@@ -41,7 +41,60 @@ enum LayoutEngine: Sendable {
         // 1. 幾何排序 YOLO 區塊 (Reading Order Algorithm)
         let sortedBlocks = sortLayoutBlocks(blocks, pageWidth: pageWidth, pageHeight: pageHeight)
 
-        // 2. 將文字碎片分配到排序好的 YOLO 區塊中
+        // 2. 預處理：解決 YOLO 區塊重疊問題 (De-Overlap by Confidence Priority)
+        //    當兩個 YOLO 區塊在垂直方向重疊時，低信心度的區塊被裁剪，讓高信心度的區塊獨佔重疊區域。
+        //    這可以從根本上解決 Section-header 搶走 List-item 文字的問題。
+        var adjustedRects: [(block: LayoutBlock, rect: CGRect)] = sortedBlocks.map { block in
+            let rect = VNImageRectForNormalizedRect(block.boundingBox, Int(pageWidth), Int(pageHeight))
+            let invertedRect = CGRect(x: rect.minX, y: pageHeight - rect.maxY, width: rect.width, height: rect.height)
+            return (block, invertedRect)
+        }
+        
+        // 按信心度排序 (高 → 低)，高信心度的區塊優先保留完整邊界
+        let byConfidence = adjustedRects.indices.sorted { adjustedRects[$0].block.confidence > adjustedRects[$1].block.confidence }
+        
+        for pass in 0..<byConfidence.count {
+            let winnerIdx = byConfidence[pass]
+            let winnerRect = adjustedRects[winnerIdx].rect
+            
+            for later in (pass + 1)..<byConfidence.count {
+                let loserIdx = byConfidence[later]
+                var loserRect = adjustedRects[loserIdx].rect
+                
+                let intersection = winnerRect.intersection(loserRect)
+                // 只處理有意義的垂直重疊 (> 5pt)
+                guard !intersection.isNull && intersection.height > 5 else { continue }
+                
+                // 判斷低信心度區塊的中心在高信心度區塊的上方還是下方，決定裁剪方向
+                let loserCenterY = loserRect.midY
+                let winnerCenterY = winnerRect.midY
+                
+                if loserCenterY > winnerCenterY {
+                    // 低信心度區塊在下方 → 將其頂部推到高信心度區塊的底部
+                    let newMinY = winnerRect.maxY
+                    let newHeight = loserRect.maxY - newMinY
+                    if newHeight > 10 {
+                        loserRect = CGRect(x: loserRect.minX, y: newMinY, width: loserRect.width, height: newHeight)
+                    }
+                } else {
+                    // 低信心度區塊在上方 → 將其底部推到高信心度區塊的頂部
+                    let newHeight = winnerRect.minY - loserRect.minY
+                    if newHeight > 10 {
+                        loserRect = CGRect(x: loserRect.minX, y: loserRect.minY, width: loserRect.width, height: newHeight)
+                    }
+                }
+                
+                adjustedRects[loserIdx] = (adjustedRects[loserIdx].block, loserRect)
+            }
+        }
+        
+        // 建立 Block ID → 裁剪後的 CGRect 查詢表
+        var adjustedRectMap: [UUID: CGRect] = [:]
+        for item in adjustedRects {
+            adjustedRectMap[item.block.id] = item.rect
+        }
+        
+        // 3. 將文字碎片分配到裁剪後的 YOLO 區塊中
         var blockFragmentsMap: [UUID: [TextFragment]] = [:]
         var unassignedFragments: [TextFragment] = []
         
@@ -49,27 +102,68 @@ enum LayoutEngine: Sendable {
             let fragArea = frag.bounds.width * frag.bounds.height
             let fragMid = CGPoint(x: frag.bounds.midX, y: frag.bounds.midY)
             
-            if let matchedBlock = sortedBlocks.first(where: {
-                let rect = VNImageRectForNormalizedRect($0.boundingBox, Int(pageWidth), Int(pageHeight))
-                let invertedRect = CGRect(x: rect.minX, y: pageHeight - rect.maxY, width: rect.width, height: rect.height)
+            var bestBlock: LayoutBlock? = nil
+            var maxIntersectionArea: CGFloat = 0
+            
+            for block in sortedBlocks {
+                guard let adjustedRect = adjustedRectMap[block.id] else { continue }
                 
-                let intersection = invertedRect.intersection(frag.bounds)
+                let intersection = adjustedRect.intersection(frag.bounds)
                 if !intersection.isNull {
-                    let intersectionArea = intersection.width * intersection.height
-                    let expanded = invertedRect.insetBy(dx: -5, dy: -5)
-                    return (fragArea > 0 && intersectionArea / fragArea > 0.4) || expanded.contains(fragMid)
-                } else {
-                    let expanded = invertedRect.insetBy(dx: -5, dy: -5)
-                    return expanded.contains(fragMid)
+                    let area = intersection.width * intersection.height
+                    if area > maxIntersectionArea {
+                        maxIntersectionArea = area
+                        bestBlock = block
+                    }
                 }
-            }) {
-                blockFragmentsMap[matchedBlock.id, default: []].append(frag)
+            }
+            
+            let overlapRatio = fragArea > 0 ? maxIntersectionArea / fragArea : 0
+            // DEBUG：確認首行被分到 header 的原因
+            let t = frag.text.trimmingCharacters(in: .whitespaces)
+            if t.hasPrefix("Because I recognize") || t.contains("BOOK") || t == "K" {
+                var log = "[assign] \"\(t.prefix(30))\" bounds=\(frag.bounds) fontSize=\(frag.fontSize)"
+                for block in sortedBlocks {
+                    guard let r = adjustedRectMap[block.id] else { continue }
+                    let i = r.intersection(frag.bounds)
+                    let a = i.isNull ? 0 : i.width * i.height
+                    log += "\n   \(block.label)(\(block.confidence)) rect=\(r) area=\(Int(a))"
+                }
+                log += "\n   ratio=\(String(format: "%.2f", overlapRatio)) → \(bestBlock?.label ?? "nil")"
+                print(log)
+            }
+            if overlapRatio > 0.4, let matched = bestBlock {
+                blockFragmentsMap[matched.id, default: []].append(frag)
             } else {
-                unassignedFragments.append(frag)
+                // Fallback：使用中心點距離判定
+                var closestBlock: LayoutBlock? = nil
+                var minDistance: CGFloat = .greatestFiniteMagnitude
+                
+                for block in sortedBlocks {
+                    guard let adjustedRect = adjustedRectMap[block.id] else { continue }
+                    let expanded = adjustedRect.insetBy(dx: -5, dy: -5)
+                    
+                    if expanded.contains(fragMid) {
+                        let centerBlock = CGPoint(x: adjustedRect.midX, y: adjustedRect.midY)
+                        let dx = centerBlock.x - fragMid.x
+                        let dy = centerBlock.y - fragMid.y
+                        let distance = dx * dx + dy * dy
+                        if distance < minDistance {
+                            minDistance = distance
+                            closestBlock = block
+                        }
+                    }
+                }
+                
+                if let fallbackBlock = closestBlock {
+                    blockFragmentsMap[fallbackBlock.id, default: []].append(frag)
+                } else {
+                    unassignedFragments.append(frag)
+                }
             }
         }
 
-        // 3. 依序組裝 YOLO 的 ParagraphBlock
+        // 4. 依序組裝 YOLO 的 ParagraphBlock
         var finalParagraphs: [ParagraphBlock] = []
         for block in sortedBlocks {
             guard let frags = blockFragmentsMap[block.id], !frags.isEmpty else { continue }
@@ -82,6 +176,12 @@ enum LayoutEngine: Sendable {
                 return yA < yB
             }
             let role = mapYoloLabelToRole(block.label)
+            if role == .heading || role == .title {
+                print("[heading] \(block.label)(\(block.confidence))")
+                for f in sortedFrags {
+                    print("   \(String(reflecting: f.text)) bounds=\(f.bounds)")
+                }
+            }
             finalParagraphs.append(buildParagraphBlock(from: sortedFrags, role: role))
         }
 
@@ -436,8 +536,13 @@ enum LayoutEngine: Sendable {
         }
         
         var innerHTML = ""
-        for frag in block.fragments {
-            let escapedText = EPUBSynthesizer.sanitizeForXML(frag.text)
+        for (index, frag) in block.fragments.enumerated() {
+            var escapedText = EPUBSynthesizer.sanitizeForXML(frag.text)
+            
+            // 安全移除尾隨換行符，避免 HTML 直譯錯誤，並將連續空白壓縮為單一空白 (處理 PDF 全齊行造成的詭異多餘空白)
+            escapedText = escapedText.replacingOccurrences(of: "\n", with: "")
+            escapedText = escapedText.replacingOccurrences(of: "\r", with: "")
+            escapedText = escapedText.replacingOccurrences(of: " +", with: " ", options: .regularExpression)
             
             // 使用相對比例 (em)，允許閱讀器自適應字體大小
             let safeBase = baseFontSize > 0 ? baseFontSize : 12.0
@@ -477,7 +582,48 @@ enum LayoutEngine: Sendable {
             if isItalic { style += " font-style: italic;" }
             if frag.colorHex != "#000000" { style += " color: \(frag.colorHex);" }
             
-            innerHTML += "<span style=\"\(style)\">\(escapedText)</span> "
+            // 判斷是否需要加入空白 (處理英文斷字、中文連續不斷字、以及 URL 換行)
+            var needsTrailingSpace = false
+            var removedHyphen = false
+            
+            if index < block.fragments.count - 1 {
+                let nextFrag = block.fragments[index + 1]
+                let currentRaw = escapedText.trimmingCharacters(in: .whitespaces)
+                let nextRaw = nextFrag.text.trimmingCharacters(in: .whitespacesAndNewlines)
+                
+                if let cLast = currentRaw.last, let nFirst = nextRaw.first {
+                    // 英文斷字修復 (e.g., hyphen- + ated -> hyphenated)
+                    if cLast == "-" && currentRaw.count > 1 {
+                        let charBeforeHyphen = currentRaw[currentRaw.index(before: currentRaw.index(before: currentRaw.endIndex))]
+                        if charBeforeHyphen.isASCII && charBeforeHyphen.isLetter && nFirst.isASCII && nFirst.isLetter {
+                            escapedText = String(currentRaw.dropLast())
+                            removedHyphen = true
+                            needsTrailingSpace = false
+                        }
+                    }
+                    
+                    if !removedHyphen {
+                        // 針對 URL 被切斷的情況，如果兩端都是 ASCII，但不都是字母/數字，可能是 URL 斷行 (例如 = 和 &)，不加空白
+                        let cAlnum = cLast.isLetter || cLast.isNumber
+                        let nAlnum = nFirst.isLetter || nFirst.isNumber
+                        let cPunct = [".", ",", "!", "?", ":", ";", "]", ")", "”", "\""].contains(cLast)
+                        let nOpen = ["[", "(", "“", "\""].contains(nFirst)
+                        
+                        if cAlnum && nAlnum {
+                            needsTrailingSpace = true
+                        } else if cPunct && nAlnum {
+                            needsTrailingSpace = true
+                        } else if cAlnum && nOpen {
+                            needsTrailingSpace = true
+                        }
+                    }
+                }
+            } else if block.role == .body {
+                // 如果是段落最後一行，通常不需要加空白，除非它是跨頁拼接的一部分
+                // 交由 stitchCrossPageParagraphs 處理跨頁邏輯
+            }
+            
+            innerHTML += "<span style=\"\(style)\">\(escapedText)</span>" + (needsTrailingSpace ? " " : "")
         }
         
         switch block.role {
@@ -500,29 +646,38 @@ enum LayoutEngine: Sendable {
     
     /// 基於啟發式法則 (標點符號與大小寫) 自動縫合因 PDF 換頁而被強制截斷的段落
     nonisolated static func stitchCrossPageParagraphs(html: String) -> String {
-        // 匹配條件：
-        // 1. 上一段結尾不是終結標點符號 (如 . ! ? 。 ！ ？ ： ； " ')
-        // 2. 下一段開頭是小寫字母、數字，或是中文字 (\p{Han})
-        // 動作：移除這兩段之間的 </p> <p class="doc-body">，並補上一個空白，將它們合併為同一個 <p>
-        
-        let pattern = "([^.!?:;。！？：；>”\"’']\\s*</span>\\s*)</p>\\s*<p class=\"doc-body\">(\\s*<span[^>]*>\\s*[a-z0-9\\p{Han}])"
-        
-        guard let regex = try? NSRegularExpression(pattern: pattern, options: []) else {
-            return html
-        }
-        
-        // 由於連續合併 (例如跨 3 頁的超長段落) 會需要多次匹配，因此我們執行取代直到無法再匹配為止
         var result = html
         var previous = ""
         
-        while result != previous {
-            previous = result
-            result = regex.stringByReplacingMatches(
-                in: result,
-                options: [],
-                range: NSRange(location: 0, length: result.utf16.count),
-                withTemplate: "$1 $2" // 插入一個空白來連接
-            )
+        // 1. 英文跨頁斷字 (e.g. hyphen- \n ated -> hyphenated)
+        // 斷字後下一頁必定是小寫字母
+        let hyphenPattern = "([a-zA-Z])-(\\s*</span>\\s*)</p>\\s*<p class=\"doc-body\">(\\s*<span[^>]*>\\s*[a-z])"
+        if let hyphenRegex = try? NSRegularExpression(pattern: hyphenPattern, options: []) {
+            while result != previous {
+                previous = result
+                result = hyphenRegex.stringByReplacingMatches(in: result, options: [], range: NSRange(location: 0, length: result.utf16.count), withTemplate: "$1$2$3")
+            }
+        }
+        
+        // 2. 英文跨頁正常連接 (ASCII to ASCII) -> 補上空白
+        previous = ""
+        let asciiPattern = "([a-zA-Z0-9,])(\\s*</span>\\s*)</p>\\s*<p class=\"doc-body\">(\\s*<span[^>]*>\\s*[a-z0-9])"
+        if let asciiRegex = try? NSRegularExpression(pattern: asciiPattern, options: []) {
+            while result != previous {
+                previous = result
+                result = asciiRegex.stringByReplacingMatches(in: result, options: [], range: NSRange(location: 0, length: result.utf16.count), withTemplate: "$1$2 $3")
+            }
+        }
+        
+        // 3. 中文/其他跨頁連接 -> 不加空白
+        // 匹配條件：前一段結尾不是終結標點符號，下一段開頭是中文字或小寫字母/數字
+        previous = ""
+        let defaultPattern = "([^.!?:;。！？：；>”\"’'-])(\\s*</span>\\s*)</p>\\s*<p class=\"doc-body\">(\\s*<span[^>]*>\\s*[a-z0-9\\p{Han}])"
+        if let defaultRegex = try? NSRegularExpression(pattern: defaultPattern, options: []) {
+            while result != previous {
+                previous = result
+                result = defaultRegex.stringByReplacingMatches(in: result, options: [], range: NSRange(location: 0, length: result.utf16.count), withTemplate: "$1$2$3")
+            }
         }
         
         return result

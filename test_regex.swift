@@ -1,19 +1,33 @@
 import Foundation
 
-let texts = [
-    "第一章 相信自己",
-    "第 八章 挑战自我",
-    "第12章",
-    "第一千二百三十四章",
-    "当你正在忍受别人不愿忍受的磨难时，脑海里也许会浮现两个问题。第一个问题是：“这么做值得吗？”尼采说过：“一个人知道自己为什么而活，就能够忍受任何生活。”请你认真想一想，你现在为什么在做这件事？当初又是什么促使你做出这个决定？其实，这是因为文章",
-    "Chapter 1",
-    "CHAPTER 12: Hello",
-    "This is chapter 5"
+let tests = [
+    ("hello", "world"),
+    ("hello,", "world"),
+    ("hello.", "world"),
+    ("Mg==", "&mid"),
+    ("https://example.com/", "path"),
+    ("Hello", "123")
 ]
 
-let pattern = "^第[一二三四五六七八九十百千萬萬0-9\\s]+章|^chapter\\s+\\d+"
-
-for text in texts {
-    let range = text.range(of: pattern, options: [.regularExpression, .caseInsensitive])
-    print("\(text.prefix(20))... -> \(range != nil)")
+for (a, b) in tests {
+    let cLast = a.last!
+    let nFirst = b.first!
+    
+    // Only add space if:
+    // 1. Both are alphanumeric
+    // 2. cLast is a punctuation that is normally followed by space (.,!?:;]) AND nFirst is alphanumeric
+    // 3. nFirst is an opening parenthesis/bracket ([( ) AND cLast is alphanumeric
+    
+    let cAlphanumeric = cLast.isLetter || cLast.isNumber
+    let nAlphanumeric = nFirst.isLetter || nFirst.isNumber
+    
+    let cPunctuation = [".", ",", "!", "?", ":", ";", "]", ")", "”", "\""].contains(cLast)
+    let nOpening = ["[", "(", "“", "\""].contains(nFirst)
+    
+    var addSpace = false
+    if cAlphanumeric && nAlphanumeric { addSpace = true }
+    else if cPunctuation && nAlphanumeric { addSpace = true }
+    else if cAlphanumeric && nOpening { addSpace = true }
+    
+    print("\(a) + \(b) -> addSpace: \(addSpace)")
 }

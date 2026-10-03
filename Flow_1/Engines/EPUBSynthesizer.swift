@@ -186,7 +186,7 @@ final class EPUBSynthesizer: Sendable {
                 <meta charset="utf-8"/>
                 <style>
                     body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; line-height: 1.6; padding: 4%; color: #1c1c1e; background-color: #ffffff; }
-                    p { margin-bottom: 1.2em; text-indent: 0; }
+                    p { margin-bottom: 1.2em; text-indent: 0; text-align: justify; overflow-wrap: break-word; word-break: break-word; }
                     h1, h2, h3 { font-weight: 700; letter-spacing: -0.02em; color: #000000; margin-top: 1.8em; margin-bottom: 0.8em; }
                     h1.doc-title { font-size: 2.2em; text-align: center; margin-bottom: 1.5em; }
                     img { max-width: 100%; height: auto; display: block; margin: 30px auto; border-radius: 12px; }
@@ -194,6 +194,8 @@ final class EPUBSynthesizer: Sendable {
                     table { border-collapse: collapse; width: 100%; margin: 24px 0; font-size: 0.9em; }
                     th, td { border: 1px solid #d1d1d6; padding: 12px 16px; }
                     th { background-color: #f2f2f7; }
+                    ul.doc-list { list-style-type: none; padding-left: 1.5em; margin-bottom: 1.2em; }
+                    li.doc-list-item { margin-bottom: 0.5em; text-indent: -1em; padding-left: 1em; }
                     @media (prefers-color-scheme: dark) {
                         body { color: #e5e5ea; background-color: #000000; }
                         h1, h2, h3 { color: #ffffff; }
@@ -334,7 +336,7 @@ final class EPUBSynthesizer: Sendable {
                     <meta charset="utf-8"/>
                     <style>
                         body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; line-height: 1.6; padding: 4%; color: #1c1c1e; background-color: #ffffff; }
-                        p { margin-bottom: 1.2em; text-indent: 0; }
+                        p { margin-bottom: 1.2em; text-indent: 0; text-align: justify; overflow-wrap: break-word; word-break: break-word; }
                         h1, h2, h3 { font-weight: 700; letter-spacing: -0.02em; color: #000000; margin-top: 1.8em; margin-bottom: 0.8em; }
                         h1.doc-title { font-size: 2.2em; text-align: center; margin-bottom: 1.5em; }
                         img { max-width: 100%; height: auto; display: block; margin: 30px auto; border-radius: 12px; }
@@ -342,6 +344,8 @@ final class EPUBSynthesizer: Sendable {
                         table { border-collapse: collapse; width: 100%; margin: 24px 0; font-size: 0.9em; }
                         th, td { border: 1px solid #d1d1d6; padding: 12px 16px; }
                         th { background-color: #f2f2f7; }
+                    ul.doc-list { list-style-type: none; padding-left: 1.5em; margin-bottom: 1.2em; }
+                    li.doc-list-item { margin-bottom: 0.5em; text-indent: -1em; padding-left: 1em; }
                         @media (prefers-color-scheme: dark) {
                             body { color: #e5e5ea; background-color: #000000; }
                             h1, h2, h3 { color: #ffffff; }

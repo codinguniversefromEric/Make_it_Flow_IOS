@@ -1,81 +1,285 @@
-//
-//  DebugPageView.swift
-//  Flow_1
-//
-//  Created by 魏嘉賢 on 2026/6/13.
-//  Rewritten to reuse shared LayoutEngine/SemanticClassifier on 2026/6/14.
-//
-
 import SwiftUI
 import PDFKit
 import Vision
 
-// 頁面顯示與除錯主畫面
 struct DebugPageView: View {
     let document: PDFDocument
-    let pageIndex: Int
-    @State private var pageImage: UIImage? = nil
-    @State private var extractedMarkdown: String = "等待 AI 解析與文字萃取..."
+    @State var pageIndex: Int
+    @Environment(\.presentationMode) var presentationMode
+    
+    // Toggles
+    @State private var showYolo = true
+    @State private var showText = true
+    @State private var showParagraphs = true
+    @State private var showOrder = true
+    
+    // Zoom/Pan
+    @State private var scale: CGFloat = 1.0
+    
+    // Data
+    @State private var isLoading = true
+    @State private var image: UIImage? = nil
+    @State private var yoloBlocks: [DebugBlock] = []
+    @State private var textFragments: [TextFragment] = []
+    @State private var paragraphs: [ParagraphWrapper] = [] // using a wrapper to avoid type issues if name differs
+    
+    struct DebugBlock: Identifiable {
+        let id = UUID()
+        let label: String
+        let rect: CGRect
+        let confidence: Float
+    }
+    
+    // Wrapper for whatever type LayoutEngine returns
+    struct ParagraphWrapper: Identifiable {
+        let id = UUID()
+        let bounds: CGRect
+        let roleName: String
+    }
     
     var body: some View {
         VStack(spacing: 0) {
-            if let image = pageImage {
-                Image(uiImage: image)
-                    .resizable()
-                    .scaledToFit()
-                    .shadow(color: Color.black.opacity(0.15), radius: 5, x: 0, y: 3)
-                    .padding()
-                    .accessibilityLabel("Debug visualization for page \(pageIndex + 1)")
-            } else {
-                VStack {
-                    ProgressView()
-                    Text("AI 模型通靈第 \(pageIndex + 1) 頁中...")
-                        .font(.caption)
-                        .foregroundColor(.gray)
-                        .padding(.top, 5)
+            // Header / Toolbar
+            HStack {
+                Button(action: {
+                    if pageIndex > 0 {
+                        pageIndex -= 1
+                        loadData()
+                    }
+                }) {
+                    Text("PREV")
+                        .font(.system(size: 14, weight: .bold, design: .monospaced))
+                        .foregroundColor(pageIndex > 0 ? .black : .gray)
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 8)
+                        .border(pageIndex > 0 ? Color.black : Color.gray, width: 2)
                 }
-                .frame(maxWidth: .infinity)
-                .aspectRatio(0.75, contentMode: .fit)
-                .background(Color.gray.opacity(0.05))
-                .padding()
-                .accessibilityElement(children: .combine)
-                .accessibilityLabel("Loading page \(pageIndex + 1)")
-                .accessibilityAddTraits(.updatesFrequently)
-            }
-            
-            VStack(alignment: .leading) {
-                Text("📝 Markdown 萃取結果")
-                    .font(.headline)
-                    .foregroundColor(.blue)
-                    .padding(.bottom, 4)
+                .disabled(pageIndex == 0)
                 
-                ScrollView {
-                    Text(extractedMarkdown)
-                        .font(.system(.body, design: .monospaced))
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding()
-                        .background(Color(UIColor.secondarySystemBackground))
-                        .cornerRadius(8)
+                Spacer()
+                
+                Text("PAGE \(pageIndex + 1) / \(document.pageCount)")
+                    .font(.custom("Times New Roman", size: 16))
+                    .fontWeight(.bold)
+                
+                Spacer()
+                
+                Button(action: {
+                    if pageIndex < document.pageCount - 1 {
+                        pageIndex += 1
+                        loadData()
+                    }
+                }) {
+                    Text("NEXT")
+                        .font(.system(size: 14, weight: .bold, design: .monospaced))
+                        .foregroundColor(pageIndex < document.pageCount - 1 ? .black : .gray)
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 8)
+                        .border(pageIndex < document.pageCount - 1 ? Color.black : Color.gray, width: 2)
                 }
-                .frame(height: 250)
+                .disabled(pageIndex >= document.pageCount - 1)
             }
-            .padding(.horizontal)
-            .padding(.bottom, 20)
+            .padding()
+            .background(Color.white)
+            .border(Color.black, width: 3)
+            .padding(.bottom, 8)
+            .zIndex(1)
+            
+            // Canvas View
+            GeometryReader { geo in
+                ZStack {
+                    Color(UIColor.systemGray5)
+                    
+                    if isLoading {
+                        VStack(spacing: 16) {
+                            ProgressView()
+                            Text("ANALYZING PAGE \(pageIndex + 1)...")
+                                .font(.system(size: 14, weight: .bold, design: .monospaced))
+                        }
+                    } else if let img = image {
+                        ScrollView([.horizontal, .vertical], showsIndicators: false) {
+                            let renderScale = (geo.size.width * scale) / img.size.width
+                            
+                            ZStack(alignment: .topLeading) {
+                                Image(uiImage: img)
+                                    .resizable()
+                                    .scaledToFit()
+                                    .frame(width: geo.size.width * scale)
+                                    .border(Color.black, width: 2)
+                                
+                                // Text Fragments
+                                if showText {
+                                    ForEach(0..<textFragments.count, id: \.self) { i in
+                                        let frag = textFragments[i]
+                                        Rectangle()
+                                            .fill(Color.green.opacity(0.3))
+                                            .frame(width: frag.bounds.width * renderScale, height: frag.bounds.height * renderScale)
+                                            .offset(x: frag.bounds.minX * renderScale, y: frag.bounds.minY * renderScale)
+                                    }
+                                }
+                                
+                                // YOLO Blocks
+                                if showYolo {
+                                    ForEach(yoloBlocks) { block in
+                                        let bColor = getColor(for: block.label)
+                                        Rectangle()
+                                            .fill(bColor.opacity(0.15))
+                                            .border(bColor, width: 3)
+                                            .frame(width: block.rect.width * renderScale, height: block.rect.height * renderScale)
+                                            .offset(x: block.rect.minX * renderScale, y: block.rect.minY * renderScale)
+                                    }
+                                }
+                                
+                                // Paragraphs & Badges
+                                ForEach(0..<paragraphs.count, id: \.self) { index in
+                                    let para = paragraphs[index]
+                                    
+                                    if showParagraphs {
+                                        Rectangle()
+                                            .fill(Color.blue.opacity(0.1))
+                                            .strokeBorder(style: StrokeStyle(lineWidth: 2, dash: [5]))
+                                            .foregroundColor(.blue)
+                                            .frame(width: para.bounds.width * renderScale, height: para.bounds.height * renderScale)
+                                            .offset(x: para.bounds.minX * renderScale, y: para.bounds.minY * renderScale)
+                                    }
+                                    
+                                    if showOrder || showYolo {
+                                        let badgeText = getBadgeText(index: index, para: para)
+                                        
+                                        if !badgeText.isEmpty {
+                                            Text(badgeText)
+                                                .font(.system(size: 10, weight: .bold, design: .monospaced))
+                                                .foregroundColor(.white)
+                                                .padding(.horizontal, 6)
+                                                .padding(.vertical, 2)
+                                                .background(showOrder ? Color.blue : Color.red)
+                                                .cornerRadius(4)
+                                                .offset(
+                                                    x: (para.bounds.maxX * renderScale) - 100, // Approximate offset to top right
+                                                    y: para.bounds.minY * renderScale
+                                                )
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            .clipped()
+            
+            // Toggles
+            HStack(spacing: 0) {
+                toggleItem("YOLO", checked: $showYolo)
+                toggleItem("TEXT", checked: $showText)
+                toggleItem("PARAGRAPHS", checked: $showParagraphs)
+                toggleItem("ORDER", checked: $showOrder)
+            }
+            .padding(.vertical, 16)
+            .background(Color.white)
+            .border(Color.black, width: 3)
+            
+            // Zoom Controls
+            HStack(spacing: 16) {
+                Button(action: { presentationMode.wrappedValue.dismiss() }) {
+                    Text("CLOSE")
+                        .font(.system(size: 14, weight: .bold, design: .monospaced))
+                        .foregroundColor(.white)
+                        .padding(.horizontal, 24)
+                        .padding(.vertical, 12)
+                        .background(Color.red)
+                        .border(Color.black, width: 3)
+                }
+                
+                Spacer()
+                
+                Button(action: { scale = max(1.0, scale - 0.5) }) {
+                    Image(systemName: "minus.magnifyingglass")
+                        .font(.system(size: 20))
+                        .foregroundColor(.black)
+                        .padding(12)
+                        .border(Color.black, width: 3)
+                }
+                
+                Button(action: { scale = min(4.0, scale + 0.5) }) {
+                    Image(systemName: "plus.magnifyingglass")
+                        .font(.system(size: 20))
+                        .foregroundColor(.black)
+                        .padding(12)
+                        .border(Color.black, width: 3)
+                }
+            }
+            .padding(16)
+            .background(Color.white)
         }
-        .task {
-            let result = await renderPageWithAIAttention()
-            self.pageImage = result.0
-            self.extractedMarkdown = result.1
+        .navigationBarHidden(true)
+        .onAppear {
+            loadData()
         }
     }
     
-    // MARK: - 核心處理
+    private func toggleItem(_ label: String, checked: Binding<Bool>) -> some View {
+        Button(action: { checked.wrappedValue.toggle() }) {
+            VStack(spacing: 4) {
+                Image(systemName: checked.wrappedValue ? "checkmark.square.fill" : "square")
+                    .foregroundColor(.black)
+                Text(label)
+                    .font(.system(size: 9, weight: .bold, design: .monospaced))
+                    .foregroundColor(.black)
+            }
+            .frame(maxWidth: .infinity)
+        }
+    }
     
-    // 核心：使用 AI 進行版面分析並回傳渲染圖片與 Markdown
-    private func renderPageWithAIAttention() async -> (UIImage?, String) {
-        guard let page = document.page(at: pageIndex) else { return (nil, "載入頁面失敗") }
+    private func loadData() {
+        isLoading = true
+        Task {
+            let (img, yolo, texts, paras) = await processPage()
+            DispatchQueue.main.async {
+                self.image = img
+                self.yoloBlocks = yolo
+                self.textFragments = texts
+                self.paragraphs = paras
+                self.isLoading = false
+            }
+        }
+    }
+    
+    private func getBadgeText(index: Int, para: ParagraphWrapper) -> String {
+        var labelPart = para.roleName
+        var confPart = ""
         
-        return await Task.detached(priority: .utility) { () -> (UIImage?, String) in
+        var maxIntersection: CGFloat = 0
+        var matchedYolo: DebugBlock? = nil
+        
+        for block in yoloBlocks {
+            let intersection = block.rect.intersection(para.bounds)
+            let area = intersection.width * intersection.height
+            if area > maxIntersection {
+                maxIntersection = area
+                matchedYolo = block
+            }
+        }
+        
+        if let matched = matchedYolo, maxIntersection > 0 {
+            labelPart = matched.label
+            confPart = String(format: " (%.2f)", matched.confidence)
+        }
+        
+        if showOrder && showYolo {
+            return "\(index + 1) | \(labelPart)\(confPart)"
+        } else if showOrder {
+            return "\(index + 1)"
+        } else if showYolo {
+            return "\(labelPart)\(confPart)"
+        }
+        return ""
+    }
+    
+    private func processPage() async -> (UIImage?, [DebugBlock], [TextFragment], [ParagraphWrapper]) {
+        guard let page = document.page(at: pageIndex) else { return (nil, [], [], []) }
+        
+        return await Task.detached(priority: .utility) {
             let pageBounds = page.bounds(for: .cropBox)
             let scale: CGFloat = 2.0
             let scaledSize = CGSize(width: pageBounds.width * scale, height: pageBounds.height * scale)
@@ -94,15 +298,10 @@ struct DebugPageView: View {
                 page.draw(with: .cropBox, to: context)
                 context.restoreGState()
             }
-            guard let cgImage = rawImage.cgImage else { return (nil, "圖片生成失敗") }
+            guard let cgImage = rawImage.cgImage else { return (nil, [], [], []) }
             
-            // ═══════════════════════════════════════
-            // YOLO 偵測
-            // ═══════════════════════════════════════
-            
+            // YOLO
             let rawObservations = await LayoutVisionManager.shared.detectLayout(in: cgImage)
-            
-            // NMS 過濾 (使用共用 NMSUtils)
             let sortedObs = rawObservations.sorted { $0.confidence > $1.confidence }
             var filteredObservations: [LayoutBlock] = []
             for obs in sortedObs {
@@ -117,13 +316,6 @@ struct DebugPageView: View {
                 if keep { filteredObservations.append(obs) }
             }
             
-            // 轉換為顯示座標
-            struct DebugBlock {
-                let label: String
-                let rect: CGRect
-                let confidence: Float
-            }
-            
             let debugBlocks: [DebugBlock] = filteredObservations.map { obs in
                 let visionRect = obs.boundingBox
                 let convertedRect = VNImageRectForNormalizedRect(visionRect, Int(scaledSize.width), Int(scaledSize.height))
@@ -133,23 +325,14 @@ struct DebugPageView: View {
                     width: convertedRect.width,
                     height: convertedRect.height
                 )
-                return DebugBlock(
-                    label: obs.label,
-                    rect: drawRect,
-                    confidence: obs.confidence
-                )
+                return DebugBlock(label: obs.label, rect: drawRect, confidence: obs.confidence)
             }
             
-            // ═══════════════════════════════════════
-            // PDFKit 文字萃取 → TextFragment
-            // ═══════════════════════════════════════
-            
-            var textFragments: [TextFragment] = []
-            
+            // Text Extraction
+            var fragments: [TextFragment] = []
             if let selection = page.selection(for: pageBounds) {
                 for line in selection.selectionsByLine() {
                     guard let lineText = line.string, !lineText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { continue }
-                    
                     let pRect = line.bounds(for: page)
                     let displayRect = CGRect(
                         x: pRect.minX * scale,
@@ -182,7 +365,7 @@ struct DebugPageView: View {
                         }
                     }
                     
-                    textFragments.append(TextFragment(
+                    fragments.append(TextFragment(
                         text: lineText,
                         bounds: displayRect,
                         fontSize: fontSize * scale,
@@ -194,116 +377,57 @@ struct DebugPageView: View {
                 }
             }
             
-            // ═══════════════════════════════════════
-            // LayoutEngine → 欄位偵測 + 段落重組
-            // ═══════════════════════════════════════
-            
-            var paragraphs = LayoutEngine.processWithLayoutBlocks(
-                fragments: textFragments,
+            // Engine
+            let engineParas = LayoutEngine.processWithLayoutBlocks(
+                fragments: fragments,
                 blocks: filteredObservations,
                 pageWidth: scaledSize.width,
                 pageHeight: scaledSize.height
             )
             
-            // ═══════════════════════════════════════
-            // 繪製除錯視覺化圖層
-            // ═══════════════════════════════════════
-            
-            let finalImage = renderer.image { ctx in
-                let context = ctx.cgContext
-                rawImage.draw(at: .zero)
-                
-                // 繪製 YOLO 偵測框
-                for (index, block) in debugBlocks.enumerated() {
-                    let blockColor = getColor(for: block.label)
-                    
-                    context.setFillColor(blockColor.withAlphaComponent(0.15).cgColor)
-                    context.fill(block.rect)
-                    context.setStrokeColor(blockColor.cgColor)
-                    context.setLineWidth(2.0)
-                    context.stroke(block.rect)
-                    
-                    let textAttributes: [NSAttributedString.Key: Any] = [
-                        .font: UIFont.systemFont(ofSize: 14, weight: .black),
-                        .foregroundColor: UIColor.white,
-                        .backgroundColor: blockColor.withAlphaComponent(0.9)
-                    ]
-                    let labelString = NSAttributedString(string: " \(index + 1). \(block.label) ", attributes: textAttributes)
-                    let textPoint = CGPoint(x: block.rect.minX, y: max(0, block.rect.minY - 20))
-                    
-                    UIGraphicsPushContext(context)
-                    labelString.draw(at: textPoint)
-                    UIGraphicsPopContext()
-                }
-                
-                // 繪製語意分類段落框 (半透明藍色)
-                for para in paragraphs {
-                    let roleColor = getRoleColor(for: para.role)
-                    context.setStrokeColor(roleColor.withAlphaComponent(0.5).cgColor)
-                    context.setLineWidth(1.0)
-                    context.setLineDash(phase: 0, lengths: [4, 4])
-                    context.stroke(para.bounds)
-                    context.setLineDash(phase: 0, lengths: [])
-                }
+            let paras: [ParagraphWrapper] = engineParas.map {
+                ParagraphWrapper(bounds: $0.bounds, roleName: $0.role.rawValue)
             }
             
-            // ═══════════════════════════════════════
-            // 組裝 Markdown 輸出
-            // ═══════════════════════════════════════
-            
-            var markdownOutput = ""
-            
-            // YOLO 視覺區域
-            for block in debugBlocks {
-                if block.label == "Picture" || block.label == "Figure" {
-                    markdownOutput += "![圖片/圖表]() (conf: \(String(format: "%.2f", block.confidence)))\n\n"
-                } else if block.label == "Table" {
-                    markdownOutput += "> [表格區塊] (conf: \(String(format: "%.2f", block.confidence)))\n\n"
-                } else if block.label == "Formula" {
-                    markdownOutput += "$$ [公式] $$ (conf: \(String(format: "%.2f", block.confidence)))\n\n"
-                }
-            }
-            
-            // 語意分類段落
-            for para in paragraphs {
-                if LayoutEngine.shouldDrop(para.role) {
-                    markdownOutput += "~~[\(para.role.rawValue)] \(para.unifiedText.prefix(40))...~~ (已丟棄)\n\n"
-                } else {
-                    markdownOutput += LayoutEngine.toHTML(block: para, baseFontSize: 12.0)
-                }
-            }
-            
-            return (finalImage, markdownOutput.isEmpty ? "未提取到任何文字" : markdownOutput)
+            return (rawImage, debugBlocks, fragments, paras)
         }.value
     }
     
-    // MARK: - 顏色工具
-    
-    private func getColor(for label: String) -> UIColor {
+    private func getColor(for label: String) -> Color {
         switch label {
-        case "Section-header": return .systemRed
-        case "Text", "Paragraph": return .systemGreen
-        case "Table": return .systemPurple
-        case "Picture", "Figure": return .systemOrange
-        case "Formula": return .systemTeal
-        case "List-item": return .systemBlue
-        case "Page-header", "Page-footer", "Footnote": return .systemGray
-        case "Caption": return .systemYellow
-        default: return .systemPink
+        case "Picture", "Figure": return Color(hex: "E91E63") // Pink
+        case "Table": return Color(hex: "9C27B0") // Purple
+        case "Formula": return Color(hex: "3F51B5") // Indigo
+        case "Text", "Paragraph": return Color(hex: "4CAF50") // Green
+        case "Title", "Section-header": return Color(hex: "FF9800") // Orange
+        case "List-item": return Color(hex: "00BCD4") // Cyan
+        default: return Color.gray
         }
     }
-    
-    private func getRoleColor(for role: SemanticRole) -> UIColor {
-        switch role {
-        case .title: return .systemRed
-        case .heading: return .systemOrange
-        case .body: return .systemGreen
-        case .listItem: return .systemBlue
-        case .footnote: return .systemGray
-        case .caption: return .systemYellow
-        case .formula: return .systemTeal
-        case .table, .picture: return .systemPurple
-        case .pageHeader, .pageFooter, .pageNumber: return .systemGray
+}
+
+extension Color {
+    init(hex: String) {
+        let hex = hex.trimmingCharacters(in: CharacterSet.alphanumerics.inverted)
+        var int: UInt64 = 0
+        Scanner(string: hex).scanHexInt64(&int)
+        let a, r, g, b: UInt64
+        switch hex.count {
+        case 3: // RGB (12-bit)
+            (a, r, g, b) = (255, (int >> 8) * 17, (int >> 4 & 0xF) * 17, (int & 0xF) * 17)
+        case 6: // RGB (24-bit)
+            (a, r, g, b) = (255, int >> 16, int >> 8 & 0xFF, int & 0xFF)
+        case 8: // ARGB (32-bit)
+            (a, r, g, b) = (int >> 24, int >> 16 & 0xFF, int >> 8 & 0xFF, int & 0xFF)
+        default:
+            (a, r, g, b) = (255, 0, 0, 0)
         }
+        self.init(
+            .sRGB,
+            red: Double(r) / 255,
+            green: Double(g) / 255,
+            blue:  Double(b) / 255,
+            opacity: Double(a) / 255
+        )
     }
 }
