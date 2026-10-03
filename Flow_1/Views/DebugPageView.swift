@@ -49,10 +49,10 @@ struct DebugPageView: View {
                 }) {
                     Text("PREV")
                         .font(.system(size: 14, weight: .bold, design: .monospaced))
-                        .foregroundColor(pageIndex > 0 ? .black : .gray)
+                        .foregroundColor(pageIndex > 0 ? .primary : .gray)
                         .padding(.horizontal, 16)
                         .padding(.vertical, 8)
-                        .border(pageIndex > 0 ? Color.black : Color.gray, width: 2)
+                        .border(pageIndex > 0 ? Color.primary : Color.gray, width: 2)
                 }
                 .disabled(pageIndex == 0)
                 
@@ -72,16 +72,16 @@ struct DebugPageView: View {
                 }) {
                     Text("NEXT")
                         .font(.system(size: 14, weight: .bold, design: .monospaced))
-                        .foregroundColor(pageIndex < document.pageCount - 1 ? .black : .gray)
+                        .foregroundColor(pageIndex < document.pageCount - 1 ? .primary : .gray)
                         .padding(.horizontal, 16)
                         .padding(.vertical, 8)
-                        .border(pageIndex < document.pageCount - 1 ? Color.black : Color.gray, width: 2)
+                        .border(pageIndex < document.pageCount - 1 ? Color.primary : Color.gray, width: 2)
                 }
                 .disabled(pageIndex >= document.pageCount - 1)
             }
             .padding()
-            .background(Color.white)
-            .border(Color.black, width: 3)
+            .background(Color(UIColor.systemBackground))
+            .border(Color.primary, width: 3)
             .padding(.bottom, 8)
             .zIndex(1)
             
@@ -105,7 +105,7 @@ struct DebugPageView: View {
                                     .resizable()
                                     .scaledToFit()
                                     .frame(width: geo.size.width * scale)
-                                    .border(Color.black, width: 2)
+                                    .border(Color.primary, width: 2)
                                 
                                 // Text Fragments
                                 if showText {
@@ -176,8 +176,8 @@ struct DebugPageView: View {
                 toggleItem("ORDER", checked: $showOrder)
             }
             .padding(.vertical, 16)
-            .background(Color.white)
-            .border(Color.black, width: 3)
+            .background(Color(UIColor.systemBackground))
+            .border(Color.primary, width: 3)
             
             // Zoom Controls
             HStack(spacing: 16) {
@@ -188,7 +188,7 @@ struct DebugPageView: View {
                         .padding(.horizontal, 24)
                         .padding(.vertical, 12)
                         .background(Color.red)
-                        .border(Color.black, width: 3)
+                        .border(Color.primary, width: 3)
                 }
                 
                 Spacer()
@@ -196,21 +196,21 @@ struct DebugPageView: View {
                 Button(action: { scale = max(1.0, scale - 0.5) }) {
                     Image(systemName: "minus.magnifyingglass")
                         .font(.system(size: 20))
-                        .foregroundColor(.black)
+                        .foregroundColor(.primary)
                         .padding(12)
-                        .border(Color.black, width: 3)
+                        .border(Color.primary, width: 3)
                 }
                 
                 Button(action: { scale = min(4.0, scale + 0.5) }) {
                     Image(systemName: "plus.magnifyingglass")
                         .font(.system(size: 20))
-                        .foregroundColor(.black)
+                        .foregroundColor(.primary)
                         .padding(12)
-                        .border(Color.black, width: 3)
+                        .border(Color.primary, width: 3)
                 }
             }
             .padding(16)
-            .background(Color.white)
+            .background(Color(UIColor.systemBackground))
         }
         .navigationBarHidden(true)
         .onAppear {
@@ -222,10 +222,10 @@ struct DebugPageView: View {
         Button(action: { checked.wrappedValue.toggle() }) {
             VStack(spacing: 4) {
                 Image(systemName: checked.wrappedValue ? "checkmark.square.fill" : "square")
-                    .foregroundColor(.black)
+                    .foregroundColor(.primary)
                 Text(label)
                     .font(.system(size: 9, weight: .bold, design: .monospaced))
-                    .foregroundColor(.black)
+                    .foregroundColor(.primary)
             }
             .frame(maxWidth: .infinity)
         }

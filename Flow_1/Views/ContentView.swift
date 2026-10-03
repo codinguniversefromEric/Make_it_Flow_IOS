@@ -29,7 +29,7 @@ struct ContentView: View {
     var body: some View {
         NavigationView {
             ZStack {
-                Color.white.ignoresSafeArea()
+                Color(UIColor.systemBackground).ignoresSafeArea()
 
                 VStack(spacing: 0) {
                     if vm.animState == .processing {
@@ -83,7 +83,7 @@ struct ContentView: View {
                 Text("PDFlux.")
                     .font(.custom("Times New Roman", size: 36))
                     .fontWeight(.bold)
-                    .foregroundColor(.black)
+                    .foregroundColor(.primary)
                 
                 Spacer()
                 
@@ -92,19 +92,19 @@ struct ContentView: View {
                     Button(action: { isGridView = false }) {
                         Image(systemName: "list.dash")
                             .font(.system(size: 20))
-                            .foregroundColor(!isGridView ? .white : .black)
+                            .foregroundColor(!isGridView ? Color(UIColor.systemBackground) : .primary)
                             .frame(width: 36, height: 36)
-                            .background(!isGridView ? Color.black : Color.white)
-                            .border(Color.black, width: 2)
+                            .background(!isGridView ? Color.primary : Color(UIColor.systemBackground))
+                            .border(Color.primary, width: 2)
                     }
                     
                     Button(action: { isGridView = true }) {
                         Image(systemName: "square.grid.2x2")
                             .font(.system(size: 20))
-                            .foregroundColor(isGridView ? .white : .black)
+                            .foregroundColor(isGridView ? Color(UIColor.systemBackground) : .primary)
                             .frame(width: 36, height: 36)
-                            .background(isGridView ? Color.black : Color.white)
-                            .border(Color.black, width: 2)
+                            .background(isGridView ? Color.primary : Color(UIColor.systemBackground))
+                            .border(Color.primary, width: 2)
                     }
                 }
             }
@@ -114,7 +114,7 @@ struct ContentView: View {
             .background(
                 Rectangle()
                     .frame(height: 3)
-                    .foregroundColor(.black)
+                    .foregroundColor(.primary)
                     .offset(y: 3),
                 alignment: .bottom
             )
@@ -131,7 +131,7 @@ struct ContentView: View {
                 if isGridView {
                     ScrollView {
                         LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 24) {
-                            ForEach(vm.libraryStore.items) { file in
+                            ForEach(vm.libraryStore.items.sorted { $0.createdAt > $1.createdAt }) { file in
                                 gridItem(for: file)
                             }
                         }
@@ -140,7 +140,7 @@ struct ContentView: View {
                 } else {
                     ScrollView {
                         LazyVStack(spacing: 0) {
-                            ForEach(vm.libraryStore.items) { file in
+                            ForEach(vm.libraryStore.items.sorted { $0.createdAt > $1.createdAt }) { file in
                                 listItem(for: file)
                             }
                         }
@@ -152,20 +152,20 @@ struct ContentView: View {
             VStack(spacing: 0) {
                 Rectangle()
                     .frame(height: 3)
-                    .foregroundColor(.black)
+                    .foregroundColor(.primary)
                 
                 Button(action: { vm.showFilePicker = true }) {
                     Text("+")
                         .font(.custom("Times New Roman", size: 48))
                         .fontWeight(.light)
-                        .foregroundColor(.black)
+                        .foregroundColor(.primary)
                         .frame(maxWidth: .infinity)
                         .padding(.vertical, 4)
-                        .border(Color.black, width: 3)
+                        .border(Color.primary, width: 3)
                 }
                 .padding(24)
             }
-            .background(Color.white)
+            .background(Color(UIColor.systemBackground))
         }
         .overlay(
             Group {
@@ -189,7 +189,7 @@ struct ContentView: View {
                 Text(file.title)
                     .font(.custom("Times New Roman", size: 14))
                     .fontWeight(.bold)
-                    .foregroundColor(.black)
+                    .foregroundColor(.primary)
                     .lineLimit(1)
                 
                 Text("\(dateStr) • \(sizeStr)")
@@ -199,7 +199,7 @@ struct ContentView: View {
             }
             Spacer()
             Image(systemName: "chevron.right")
-                .foregroundColor(.black)
+                .foregroundColor(.primary)
         }
         .padding(.horizontal, 24)
         .padding(.vertical, 20)
@@ -224,9 +224,9 @@ struct ContentView: View {
         VStack(alignment: .leading) {
             ZStack(alignment: .topTrailing) {
                 Rectangle()
-                    .fill(Color.white)
+                    .fill(Color(UIColor.systemBackground))
                     .aspectRatio(3/4, contentMode: .fit)
-                    .border(Color.black, width: 3)
+                    .border(Color.primary, width: 3)
                 
                 // Dog ear / corner fold
                 Path { path in
@@ -235,12 +235,12 @@ struct ContentView: View {
                     path.addLine(to: CGPoint(x: 0, y: 16))
                     path.closeSubpath()
                 }
-                .fill(Color.black)
+                .fill(Color.primary)
                 
                 Text(String(file.title.first ?? "D").uppercased())
                     .font(.custom("Times New Roman", size: 64))
                     .fontWeight(.bold)
-                    .foregroundColor(.black)
+                    .foregroundColor(.primary)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
             .padding(.bottom, 12)
@@ -248,7 +248,7 @@ struct ContentView: View {
             Text(file.title)
                 .font(.custom("Times New Roman", size: 12))
                 .fontWeight(.bold)
-                .foregroundColor(.black)
+                .foregroundColor(.primary)
                 .lineLimit(2)
                 .padding(.top, 8)
         }
@@ -266,7 +266,6 @@ struct ContentView: View {
         if let windowScene = UIApplication.shared.connectedScenes.first(where: { $0.activationState == .foregroundActive }) as? UIWindowScene,
            let rootVC = windowScene.windows.first?.rootViewController {
             
-            // Provide a popover presentation controller for iPad
             if let popover = activityVC.popoverPresentationController {
                 popover.sourceView = rootVC.view
                 popover.sourceRect = CGRect(x: UIScreen.main.bounds.midX, y: UIScreen.main.bounds.midY, width: 0, height: 0)
@@ -306,15 +305,15 @@ struct ContentView: View {
                     }) {
                         Text("DELETE")
                             .font(.system(size: 12, weight: .bold, design: .monospaced))
-                            .foregroundColor(.black)
+                            .foregroundColor(.primary)
                             .padding(.horizontal, 16)
                             .padding(.vertical, 8)
                     }
                 }
             }
             .padding(24)
-            .background(Color.white)
-            .border(Color.black, width: 3)
+            .background(Color(UIColor.systemBackground))
+            .border(Color.primary, width: 3)
             .padding(40)
         }
     }
@@ -329,7 +328,7 @@ struct ContentView: View {
                 Text(documentName.isEmpty ? "document.pdf" : "\(documentName).pdf")
                     .font(.custom("Times New Roman", size: 24))
                     .fontWeight(.bold)
-                    .foregroundColor(.black)
+                    .foregroundColor(.primary)
                     .multilineTextAlignment(.center)
                 
                 // 10 blocks progress bar
@@ -343,8 +342,8 @@ struct ContentView: View {
                         let isCurrent = i == completedGrids
                         
                         Rectangle()
-                            .fill(isCompleted ? Color.black : Color.white)
-                            .border(isCurrent ? Color.black : (isCompleted ? Color.black : Color(UIColor.systemGray5)), width: 2)
+                            .fill(isCompleted ? Color.primary : Color(UIColor.systemBackground))
+                            .border(isCurrent ? Color.primary : (isCompleted ? Color.primary : Color(UIColor.systemGray5)), width: 2)
                             .frame(height: 24)
                     }
                 }
@@ -361,12 +360,12 @@ struct ContentView: View {
                     .foregroundColor(.gray)
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, 12)
-                    .border(Color.black, width: 2)
+                    .border(Color.primary, width: 2)
             }
             .padding(24)
             .padding(.bottom, 32)
         }
-        .background(Color.white)
+        .background(Color(UIColor.systemBackground))
     }
 
     // MARK: - Success View
@@ -379,7 +378,7 @@ struct ContentView: View {
                 Text("Ready.")
                     .font(.custom("Times New Roman", size: 64))
                     .fontWeight(.bold)
-                    .foregroundColor(.black)
+                    .foregroundColor(.primary)
                 
                 HStack(spacing: 0) {
                     Text(documentName.isEmpty ? "document" : documentName)
@@ -388,13 +387,13 @@ struct ContentView: View {
                 }
                 .font(.custom("Times New Roman", size: 18))
                 .fontWeight(.bold)
-                .foregroundColor(.black)
+                .foregroundColor(.primary)
                 .padding(.bottom, 8)
                 .padding(.horizontal, 16)
                 .background(
                     Rectangle()
                         .frame(height: 2)
-                        .foregroundColor(.black)
+                        .foregroundColor(.primary)
                         .offset(y: 2),
                     alignment: .bottom
                 )
@@ -408,15 +407,21 @@ struct ContentView: View {
                         shareOrOpen(file: LibraryItem(id: UUID(), url: url, title: documentName, createdAt: Date(), diagnosticsSummary: ""))
                     }
                 }) {
-                    Text("OPEN EPUB")
-                        .font(.custom("Times New Roman", size: 12))
+                    VStack(spacing: 2) {
+                        Text("EXPORT EPUB")
+                            .font(.custom("Times New Roman", size: 12))
+                            .fontWeight(.bold)
+                            .tracking(2)
+                        Text("(SHARE TO APPLE BOOKS)")
+                            .font(.system(size: 8, weight: .bold, design: .monospaced))
+                    }
                         .fontWeight(.bold)
                         .tracking(2)
-                        .foregroundColor(.white)
+                        .foregroundColor(Color(UIColor.systemBackground))
                         .frame(maxWidth: .infinity)
                         .padding(.vertical, 16)
-                        .background(Color.black)
-                        .border(Color.black, width: 3)
+                        .background(Color.primary)
+                        .border(Color.primary, width: 3)
                 }
                 
                 Button(action: {
@@ -427,17 +432,17 @@ struct ContentView: View {
                         .font(.custom("Times New Roman", size: 12))
                         .fontWeight(.bold)
                         .tracking(2)
-                        .foregroundColor(.black)
+                        .foregroundColor(.primary)
                         .frame(maxWidth: .infinity)
                         .padding(.vertical, 16)
-                        .background(Color.white)
-                        .border(Color.black, width: 3)
+                        .background(Color(UIColor.systemBackground))
+                        .border(Color.primary, width: 3)
                 }
             }
             .padding(24)
             .padding(.bottom, 32)
         }
-        .background(Color.white)
+        .background(Color(UIColor.systemBackground))
     }
 
     // MARK: - Dev Tools Panel
@@ -461,11 +466,11 @@ struct ContentView: View {
                     ForEach(VisionModelType.allCases, id: \.self) { model in
                         Text(model.rawValue)
                             .font(.system(size: 9))
-                            .foregroundColor(settings.selectedModel == model ? .white : .black)
+                            .foregroundColor(settings.selectedModel == model ? Color(UIColor.systemBackground) : .primary)
                             .padding(.horizontal, 8)
                             .padding(.vertical, 4)
-                            .background(settings.selectedModel == model ? Color.black : Color.clear)
-                            .border(settings.selectedModel == model ? Color.black : Color.gray, width: 1)
+                            .background(settings.selectedModel == model ? Color.primary : Color.clear)
+                            .border(settings.selectedModel == model ? Color.primary : Color.gray, width: 1)
                             .onTapGesture {
                                 settings.selectedModel = model
                             }
@@ -477,10 +482,10 @@ struct ContentView: View {
                 NavigationLink(destination: DebugPageView(document: doc, pageIndex: 0)) {
                     Text("Open Visual Debugger")
                         .font(.system(size: 10, design: .monospaced))
-                        .foregroundColor(.black)
+                        .foregroundColor(.primary)
                         .frame(maxWidth: .infinity)
                         .padding(.vertical, 8)
-                        .border(Color.black, width: 1)
+                        .border(Color.primary, width: 1)
                 }
             }
         }
@@ -489,7 +494,7 @@ struct ContentView: View {
         .background(
             Rectangle()
                 .frame(height: 3)
-                .foregroundColor(.black)
+                .foregroundColor(.primary)
                 .offset(y: -3),
             alignment: .top
         )
@@ -500,7 +505,7 @@ struct CheckboxToggleStyle: ToggleStyle {
     func makeBody(configuration: Configuration) -> some View {
         HStack {
             Image(systemName: configuration.isOn ? "checkmark.square.fill" : "square")
-                .foregroundColor(.black)
+                .foregroundColor(.primary)
                 .onTapGesture { configuration.isOn.toggle() }
             configuration.label
         }
