@@ -78,7 +78,7 @@ The project comes pre-packaged with three lightweight CoreML models based on [ha
 | **YOLOv26 Small** | **~0.06 seconds** | **0.721** | **0.407** | Good balance of speed and precision for standard devices. |
 | **YOLOv26 Medium** | **~0.07 seconds** | **0.728** | **0.403** | Alternative for complex, multi-column academic papers with dense tables and charts. |
 
-*Note: Benchmarks were measured on Apple Silicon (M-series) against the full Hugging Face `marker_benchmark` dataset (2,138 documents). The built-in Swift engine merges deep layout bounding boxes with native PDFKit data, generating accurate EPUB architectures orders of magnitude faster than Python-based alternatives.*
+*Note: Benchmarks were measured on Apple Silicon (M-series) against the full Hugging Face `marker_benchmark` dataset (2,138 documents). The built-in Swift engine merges deep layout bounding boxes with native PDFKit data, generating accurate EPUB architectures orders of magnitude faster than Python-based alternatives. **Make_it_Flow trades ~10-15% raw text retention (by converting complex tables and scanned PDFs into high-fidelity images instead of relying on heavy OCR) in exchange for lightning-fast, 100% offline mobile processing and publisher-grade visual aesthetics.***
 
 ## ⚖️ License & Acknowledgements
 
