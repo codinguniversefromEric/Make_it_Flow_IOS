@@ -6,35 +6,39 @@
     <title>PDFlux - PDF to EPUB</title>
     <style>
         :root {
-            --bg-color: #f5f5f7;
+            --bg-color: #ffffff;
             --container-bg: #ffffff;
-            --text-primary: #1d1d1f;
-            --text-secondary: #86868b;
-            --accent-color: #007aff;
-            --accent-hover: #0071eb;
-            --border-color: #d2d2d7;
+            --text-primary: #000000;
+            --text-secondary: #555555;
+            --accent-color: #000000;
+            --accent-text: #ffffff;
+            --border-color: #000000;
+            --shadow-color: #000000;
         }
 
         @media (prefers-color-scheme: dark) {
             :root {
-                --bg-color: #000000;
-                --container-bg: #1c1c1e;
-                --text-primary: #f5f5f7;
-                --text-secondary: #a1a1a6;
-                --accent-color: #0a84ff;
-                --accent-hover: #3299ff;
-                --border-color: #38383a;
+                --bg-color: #0d0d0d;
+                --container-bg: #0d0d0d;
+                --text-primary: #00ff00; /* Hacker green vibe in dark mode */
+                --text-secondary: #00aa00;
+                --accent-color: #00ff00;
+                --accent-text: #0d0d0d;
+                --border-color: #00ff00;
+                --shadow-color: #00ff00;
+            }
+            img.logo {
+                filter: invert(1) sepia(1) saturate(5) hue-rotate(60deg);
             }
         }
 
         body {
-            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            font-family: "Courier New", Courier, monospace;
             background-color: var(--bg-color);
             color: var(--text-primary);
             line-height: 1.6;
             margin: 0;
             padding: 0;
-            -webkit-font-smoothing: antialiased;
             display: flex;
             flex-direction: column;
             min-height: 100vh;
@@ -46,6 +50,7 @@
             top: 20px;
             right: 20px;
             font-size: 14px;
+            font-weight: bold;
         }
         .lang-switcher a {
             color: var(--text-secondary);
@@ -54,30 +59,42 @@
         }
         .lang-switcher a.active {
             color: var(--text-primary);
-            font-weight: 600;
+            text-decoration: underline;
         }
         .lang-switcher a:hover {
-            text-decoration: underline;
+            color: var(--text-primary);
         }
 
         header {
             text-align: center;
-            padding: 80px 20px 40px;
+            padding: 60px 20px 20px;
             margin-top: 20px;
         }
 
+        .logo-container {
+            margin-bottom: 20px;
+        }
+
+        .logo {
+            width: 150px;
+            border: 2px solid var(--border-color);
+            box-shadow: 4px 4px 0px var(--shadow-color);
+        }
+
         h1 {
-            font-size: 48px;
+            font-size: 32px;
             font-weight: 700;
             margin-bottom: 16px;
-            letter-spacing: -0.03em;
+            text-transform: uppercase;
             max-width: 800px;
             margin-left: auto;
             margin-right: auto;
+            border-bottom: 2px dashed var(--border-color);
+            padding-bottom: 10px;
         }
 
         .subtitle {
-            font-size: 24px;
+            font-size: 18px;
             color: var(--text-secondary);
             font-weight: 400;
             max-width: 600px;
@@ -87,31 +104,35 @@
         .cta-button {
             display: inline-block;
             background-color: var(--accent-color);
-            color: #ffffff;
-            font-size: 17px;
-            font-weight: 600;
+            color: var(--accent-text);
+            font-size: 18px;
+            font-weight: bold;
             padding: 14px 28px;
-            border-radius: 30px;
+            border: 2px solid var(--border-color);
+            box-shadow: 6px 6px 0px var(--shadow-color);
             text-decoration: none;
-            transition: background-color 0.2s ease;
+            text-transform: uppercase;
+            transition: all 0.1s ease;
         }
 
-        .cta-button:hover {
-            background-color: var(--accent-hover);
+        .cta-button:active {
+            box-shadow: 0px 0px 0px var(--shadow-color);
+            transform: translate(6px, 6px);
         }
 
         .tf-hint {
-            font-size: 13px;
+            font-size: 12px;
             color: var(--text-secondary);
-            margin-top: 12px;
+            margin-top: 20px;
             margin-bottom: 0;
+            text-transform: uppercase;
         }
 
         .features-section {
             display: flex;
             justify-content: center;
             flex-wrap: wrap;
-            gap: 40px;
+            gap: 30px;
             padding: 60px 20px;
             max-width: 1000px;
             margin: 0 auto;
@@ -119,94 +140,93 @@
 
         .feature-card {
             background-color: var(--container-bg);
-            padding: 32px;
-            border-radius: 20px;
+            padding: 24px;
             flex: 1;
             min-width: 250px;
-            box-shadow: 0 4px 24px rgba(0, 0, 0, 0.04);
-            text-align: center;
+            border: 2px solid var(--border-color);
+            box-shadow: 6px 6px 0px var(--shadow-color);
         }
 
         .feature-icon {
-            font-size: 32px;
+            font-size: 20px;
+            font-weight: bold;
             margin-bottom: 16px;
+            color: var(--text-primary);
         }
 
         .feature-title {
-            font-size: 20px;
-            font-weight: 600;
+            font-size: 18px;
+            font-weight: bold;
             margin-bottom: 12px;
+            text-transform: uppercase;
         }
 
         .feature-desc {
             color: var(--text-secondary);
-            font-size: 15px;
+            font-size: 14px;
         }
 
         footer {
             margin-top: auto;
             text-align: center;
-            padding: 40px 20px;
-            border-top: 1px solid var(--border-color);
+            padding: 30px 20px;
+            border-top: 2px solid var(--border-color);
         }
 
         footer a {
             color: var(--text-secondary);
             text-decoration: none;
             font-size: 14px;
+            font-weight: bold;
         }
 
         footer a:hover {
+            color: var(--text-primary);
             text-decoration: underline;
         }
 
         @media (max-width: 768px) {
-            h1 {
-                font-size: 36px;
-            }
-            .subtitle {
-                font-size: 20px;
-            }
-            .features-section {
-                flex-direction: column;
-                gap: 20px;
-            }
+            h1 { font-size: 24px; }
+            .features-section { flex-direction: column; }
         }
     </style>
 </head>
 <body>
     <div class="lang-switcher">
-        <a href="#" class="active">EN</a> | <a href="index_zh.html">繁體中文</a>
+        <a href="#" class="active">[ EN ]</a> | <a href="index_zh.html">[ 中文 ]</a>
     </div>
 
     <header>
-        <h1>Transform PDFs into beautiful EPUBs entirely on your device.</h1>
-        <p class="subtitle">PDFlux is the fast, private, and effortless way to convert documents for a native reading experience.</p>
-        <a href="https://testflight.apple.com/join/nVmTyMGb" class="cta-button" target="_blank" rel="noopener noreferrer">Join TestFlight</a>
-        <p class="tf-hint">* Requires Apple's free TestFlight app</p>
+        <div class="logo-container">
+            <img src="assets/logo.jpg" alt="PDFlux Logo" class="logo">
+        </div>
+        <h1>> Transform PDFs into EPUBs</h1>
+        <p class="subtitle">100% On-device. Fast, private, and brutalist.</p>
+        <a href="https://testflight.apple.com/join/nVmTyMGb" class="cta-button" target="_blank" rel="noopener noreferrer">EXECUTE_TESTFLIGHT</a>
+        <p class="tf-hint">sys.req: Apple TestFlight App</p>
     </header>
 
     <div class="features-section">
         <div class="feature-card">
-            <div class="feature-icon">🔒</div>
-            <div class="feature-title">On-Device Processing</div>
-            <div class="feature-desc">100% private. Extracts text and images from PDFs instantly without ever sending your files to a server.</div>
+            <div class="feature-icon">[ SECURE ]</div>
+            <div class="feature-title">On-Device</div>
+            <div class="feature-desc">100% private. Extracts text and images from PDFs instantly. No server. No telemetry.</div>
         </div>
         <div class="feature-card">
-            <div class="feature-icon">🧠</div>
+            <div class="feature-icon">[ AI ENGINE ]</div>
             <div class="feature-title">Layout Analysis</div>
-            <div class="feature-desc">Intelligently understands reading order, columns, and figures to perfectly restructure your documents.</div>
+            <div class="feature-desc">CoreML YOLO engine intelligently decodes reading order, columns, and figures offline.</div>
         </div>
         <div class="feature-card">
-            <div class="feature-icon">📚</div>
-            <div class="feature-title">Publisher-Grade EPUB</div>
-            <div class="feature-desc">Outputs beautiful, native Apple Books style EPUBs with responsive typography and dark mode support.</div>
+            <div class="feature-icon">[ EPUB ]</div>
+            <div class="feature-title">Publisher-Grade</div>
+            <div class="feature-desc">Compiles beautiful, native Apple Books style EPUBs with responsive CSS architecture.</div>
         </div>
     </div>
 
     <footer>
-        <a href="privacy.html">Privacy Policy</a>
-        <p style="color: var(--text-secondary); font-size: 12px; margin-top: 12px;">&copy; 2026 PDFlux.</p>
+        <a href="privacy.html">>> PRIVACY_POLICY</a>
+        <p style="color: var(--text-secondary); font-size: 12px; margin-top: 12px;">(c) 2026 PDFLUX_SYS.</p>
     </footer>
 
 </body>
