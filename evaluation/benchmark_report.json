@@ -1,0 +1,23 @@
+{
+    "nano": {
+        "valid_samples": 2138,
+        "total_samples": 2138,
+        "layout_similarity": 0.7301,
+        "edit_distance": 0.399,
+        "time_seconds": 5071.41
+    },
+    "small": {
+        "valid_samples": 2138,
+        "total_samples": 2138,
+        "layout_similarity": 0.721,
+        "edit_distance": 0.4074,
+        "time_seconds": 5791.02
+    },
+    "medium": {
+        "valid_samples": 2138,
+        "total_samples": 2138,
+        "layout_similarity": 0.7285,
+        "edit_distance": 0.4033,
+        "time_seconds": 6939.35
+    }
+}
