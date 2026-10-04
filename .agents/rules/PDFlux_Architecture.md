@@ -1,12 +1,12 @@
 ---
-name: make-it-flow-architecture
-description: 確保 Make_it_Flow 的排版引擎、EPUB 打包與視覺區塊處理的架構完整性與設計準則
+name: pdflux-architecture
+description: 確保 PDFlux 的排版引擎、EPUB 打包與視覺區塊處理的架構完整性與設計準則
 trigger: always_on
 ---
 
-# Make it Flow Architecture & Guidelines
+# PDFlux Architecture & Guidelines
 
-這份規則記錄了我們為了讓 `Make_it_Flow` 達到「Publisher-Grade Output (出版社級別的電子書)」所確立的核心架構與設計決策。
+這份規則記錄了我們為了讓 `PDFlux` 達到「Publisher-Grade Output (出版社級別的電子書)」所確立的核心架構與設計決策。
 任何對 PDF 解析、排版引擎、或是 EPUB 打包的修改，都必須遵守以下準則：
 
 ## 1. 視覺區塊 (Visual Regions) 的生命週期與排序
