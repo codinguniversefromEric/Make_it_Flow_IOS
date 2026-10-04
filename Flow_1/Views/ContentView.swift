@@ -223,9 +223,27 @@ struct ContentView: View {
     private func gridItem(for file: LibraryItem) -> some View {
         VStack(alignment: .leading) {
             ZStack(alignment: .topTrailing) {
-                Rectangle()
-                    .fill(Color(UIColor.systemBackground))
+                Color.clear
                     .aspectRatio(3/4, contentMode: .fit)
+                    .overlay(
+                        Group {
+                            if let uiImage = vm.libraryStore.loadThumbnail(for: file) {
+                                Image(uiImage: uiImage)
+                                    .resizable()
+                                    .aspectRatio(contentMode: .fill)
+                            } else {
+                                ZStack {
+                                    Rectangle()
+                                        .fill(Color(UIColor.systemBackground))
+                                    Text(String(file.title.first ?? "D").uppercased())
+                                        .font(.custom("Times New Roman", size: 64))
+                                        .fontWeight(.bold)
+                                        .foregroundColor(.primary)
+                                }
+                            }
+                        }
+                    )
+                    .clipped()
                     .border(Color.primary, width: 3)
                 
                 // Dog ear / corner fold
@@ -236,12 +254,6 @@ struct ContentView: View {
                     path.closeSubpath()
                 }
                 .fill(Color.primary)
-                
-                Text(String(file.title.first ?? "D").uppercased())
-                    .font(.custom("Times New Roman", size: 64))
-                    .fontWeight(.bold)
-                    .foregroundColor(.primary)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
             .padding(.bottom, 12)
             
