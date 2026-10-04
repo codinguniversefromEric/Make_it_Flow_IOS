@@ -11,8 +11,7 @@ func main() async {
     
     let inputPath = args[1]
     let outputPath = args[2]
-    
-    var selectedModel: VisionModelType = .yoloStandard
+    var selectedModel: VisionModelType = .yoloFast
     if args.count >= 4 {
         let modelArg = args[3].lowercased()
         if modelArg == "nano" { selectedModel = .yoloFast }

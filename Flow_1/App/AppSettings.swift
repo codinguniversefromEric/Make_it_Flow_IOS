@@ -41,9 +41,9 @@ class AppSettings: ObservableObject {
     }
     
     private init() {
-        // 設定為 Medium (yoloMedium) 作為最高畫質/準確度的預設值
-        let savedModelRaw = UserDefaults.standard.string(forKey: Keys.selectedModel) ?? VisionModelType.yoloMedium.rawValue
-        self.selectedModel = VisionModelType(rawValue: savedModelRaw) ?? .yoloMedium
+        // 設定為 Nano (yoloFast) 作為預設值，因為 Benchmark 顯示其不僅最快，且錯誤率最低
+        let savedModelRaw = UserDefaults.standard.string(forKey: Keys.selectedModel) ?? VisionModelType.yoloFast.rawValue
+        self.selectedModel = VisionModelType(rawValue: savedModelRaw) ?? .yoloFast
         
         #if DEBUG
         self.debugMode = UserDefaults.standard.object(forKey: Keys.debugMode) as? Bool ?? false
