@@ -83,7 +83,7 @@ The project comes pre-packaged with three lightweight CoreML models based on [ha
 ## ⚖️ License & Acknowledgements
 
 * Code License: **AGPL-3.0**
-* YOLO Framework: [Ultralytics YOLOv8](https://github.com/ultralytics/ultralytics) (AGPL-3.0)
+* YOLO Framework: **YOLOv26**
 * Model Weights: [hantian/yolo-doclaynet](https://huggingface.co/hantian/yolo-doclaynet/tree/main)
 
 *⚠️ Note: The "Make it Flow" brand name, App Store presence, and UI/UX designs are the exclusive property of the author. Repackaging and publishing the app to the App Store without authorization is strictly prohibited.*
