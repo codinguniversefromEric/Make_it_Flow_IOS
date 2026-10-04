@@ -38,3 +38,7 @@ trigger: always_on
 - **獨立的 Target**：CLI 是一個獨立的 Swift Executable Target (`Flow_CLI`)，與 iOS App 共用相同的核心引擎 (如 `BatchProcessor`, `VisionEngine`)。
 - **參數與資源綁定**：CLI 模式下，必須正確解析引數 `[nano|small|medium]`，並且 CoreML 模型權重已經透過 `Package.swift` 與實體資料夾複製 (`Models/`) 完整封裝進 CLI，確保 100% 離線可用。
 - **無縫產出 EPUB**：CLI 的輸出應與 iOS App 一致，直接調用 `BatchProcessor` 並將最終的 `exportedFileURL` (EPUB) 搬移至使用者指定的 `output.epub` 路徑。
+
+## 7. AI 模型選擇與 Benchmark 評估準則 (Model Selection & Benchmarking)
+- **預設模型 (Default Model)**：無論是 iOS App 或是 CLI 模式，**皆必須將 `Nano` (`yoloFast`) 設為系統預設模型**。根據大規模基準測試，Nano 在維持最低錯誤率與最高排版保留率的同時，具備最快的執行速度與最低的硬體消耗。
+- **全資料集測試防呆 (Avoid Small-Sample Bias)**：過去在開發時曾因僅隨機抽取 50 筆樣本進行測試，導致嚴重的統計偏見（誤以為 Medium 模型準確度遠勝 Nano）。未來的任何架構改動，若需進行模型性能評估，**必須強制跑完完整的 `marker_benchmark` (2,138 筆) 資料集**，嚴禁依賴小樣本子集來做出架構決策。
