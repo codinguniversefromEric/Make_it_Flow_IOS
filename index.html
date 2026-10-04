@@ -3,231 +3,299 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>PDFlux - PDF to EPUB</title>
+    <title>PDFlux - OS Simulator</title>
     <style>
         :root {
-            --bg-color: #ffffff;
-            --container-bg: #ffffff;
-            --text-primary: #000000;
-            --text-secondary: #555555;
-            --accent-color: #000000;
-            --accent-text: #ffffff;
-            --border-color: #000000;
-            --shadow-color: #000000;
+            --os-bg: #008080; /* Retro teal background */
+            --window-bg: #c0c0c0;
+            --window-border-light: #ffffff;
+            --window-border-dark: #000000;
+            --window-border-shadow: #808080;
+            --title-bg: #000080;
+            --title-text: #ffffff;
+            --text-main: #000000;
+            --terminal-bg: #000000;
+            --terminal-text: #00ff00;
         }
 
         @media (prefers-color-scheme: dark) {
             :root {
-                --bg-color: #0d0d0d;
-                --container-bg: #0d0d0d;
-                --text-primary: #00ff00; /* Hacker green vibe in dark mode */
-                --text-secondary: #00aa00;
-                --accent-color: #00ff00;
-                --accent-text: #0d0d0d;
-                --border-color: #00ff00;
-                --shadow-color: #00ff00;
-            }
-            img.logo {
-                filter: invert(1) sepia(1) saturate(5) hue-rotate(60deg);
+                --os-bg: #050505; /* Hacker dark */
+                --window-bg: #1a1a1a;
+                --window-border-light: #444;
+                --window-border-dark: #000;
+                --window-border-shadow: #111;
+                --title-bg: #000000;
+                --title-text: #00ff00;
+                --text-main: #00ff00;
             }
         }
 
         body {
-            font-family: "Courier New", Courier, monospace;
-            background-color: var(--bg-color);
-            color: var(--text-primary);
-            line-height: 1.6;
+            font-family: 'Courier New', Courier, monospace;
+            background-color: var(--os-bg);
             margin: 0;
-            padding: 0;
+            height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            overflow: hidden;
+        }
+
+        /* Lang switcher in top right like an OS menu */
+        .os-menu {
+            position: absolute;
+            top: 0; left: 0; right: 0;
+            background-color: var(--window-bg);
+            border-bottom: 2px solid var(--window-border-dark);
+            padding: 5px 15px;
+            display: flex;
+            justify-content: space-between;
+            font-size: 14px;
+            color: var(--text-main);
+            box-shadow: 0 2px 0 var(--window-border-shadow);
+        }
+        .os-menu a {
+            color: var(--text-main);
+            text-decoration: none;
+            margin-left: 15px;
+        }
+        .os-menu a:hover {
+            background-color: var(--title-bg);
+            color: var(--title-text);
+        }
+
+        /* Retro Window */
+        .window {
+            background-color: var(--window-bg);
+            border-top: 2px solid var(--window-border-light);
+            border-left: 2px solid var(--window-border-light);
+            border-right: 2px solid var(--window-border-dark);
+            border-bottom: 2px solid var(--window-border-dark);
+            width: 90%;
+            max-width: 500px;
+            box-shadow: 4px 4px 0px rgba(0,0,0,0.5);
             display: flex;
             flex-direction: column;
-            min-height: 100vh;
             position: relative;
         }
 
-        .lang-switcher {
-            position: absolute;
-            top: 20px;
-            right: 20px;
+        .title-bar {
+            background-color: var(--title-bg);
+            color: var(--title-text);
+            padding: 4px 8px;
+            font-weight: bold;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
             font-size: 14px;
-            font-weight: bold;
-        }
-        .lang-switcher a {
-            color: var(--text-secondary);
-            text-decoration: none;
-            padding: 0 4px;
-        }
-        .lang-switcher a.active {
-            color: var(--text-primary);
-            text-decoration: underline;
-        }
-        .lang-switcher a:hover {
-            color: var(--text-primary);
         }
 
-        header {
-            text-align: center;
-            padding: 60px 20px 20px;
-            margin-top: 20px;
+        .title-buttons {
+            display: flex;
+            gap: 4px;
         }
 
-        .logo-container {
-            margin-bottom: 20px;
-        }
-
-        .logo {
-            width: 150px;
-            border: 2px solid var(--border-color);
-            box-shadow: 4px 4px 0px var(--shadow-color);
-        }
-
-        h1 {
-            font-size: 32px;
-            font-weight: 700;
-            margin-bottom: 16px;
-            text-transform: uppercase;
-            max-width: 800px;
-            margin-left: auto;
-            margin-right: auto;
-            border-bottom: 2px dashed var(--border-color);
-            padding-bottom: 10px;
-        }
-
-        .subtitle {
-            font-size: 18px;
-            color: var(--text-secondary);
-            font-weight: 400;
-            max-width: 600px;
-            margin: 0 auto 40px;
-        }
-
-        .cta-button {
-            display: inline-block;
-            background-color: var(--accent-color);
-            color: var(--accent-text);
-            font-size: 18px;
-            font-weight: bold;
-            padding: 14px 28px;
-            border: 2px solid var(--border-color);
-            box-shadow: 6px 6px 0px var(--shadow-color);
-            text-decoration: none;
-            text-transform: uppercase;
-            transition: all 0.1s ease;
-        }
-
-        .cta-button:active {
-            box-shadow: 0px 0px 0px var(--shadow-color);
-            transform: translate(6px, 6px);
-        }
-
-        .tf-hint {
-            font-size: 12px;
-            color: var(--text-secondary);
-            margin-top: 20px;
-            margin-bottom: 0;
-            text-transform: uppercase;
-        }
-
-        .features-section {
+        .title-btn {
+            background-color: var(--window-bg);
+            border-top: 1px solid var(--window-border-light);
+            border-left: 1px solid var(--window-border-light);
+            border-right: 1px solid var(--window-border-dark);
+            border-bottom: 1px solid var(--window-border-dark);
+            width: 16px;
+            height: 16px;
             display: flex;
             justify-content: center;
-            flex-wrap: wrap;
-            gap: 30px;
-            padding: 60px 20px;
-            max-width: 1000px;
-            margin: 0 auto;
-        }
-
-        .feature-card {
-            background-color: var(--container-bg);
-            padding: 24px;
-            flex: 1;
-            min-width: 250px;
-            border: 2px solid var(--border-color);
-            box-shadow: 6px 6px 0px var(--shadow-color);
-        }
-
-        .feature-icon {
-            font-size: 20px;
+            align-items: center;
+            font-size: 10px;
+            color: #000;
             font-weight: bold;
-            margin-bottom: 16px;
-            color: var(--text-primary);
+            cursor: pointer;
+        }
+        .title-btn:active {
+            border-top: 1px solid var(--window-border-dark);
+            border-left: 1px solid var(--window-border-dark);
+            border-right: 1px solid var(--window-border-light);
+            border-bottom: 1px solid var(--window-border-light);
         }
 
-        .feature-title {
-            font-size: 18px;
-            font-weight: bold;
-            margin-bottom: 12px;
-            text-transform: uppercase;
+        .window-content {
+            padding: 20px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            color: var(--text-main);
         }
 
-        .feature-desc {
-            color: var(--text-secondary);
-            font-size: 14px;
+        .logo-img {
+            width: 120px;
+            margin-bottom: 20px;
+            border: 2px solid var(--window-border-dark);
         }
 
-        footer {
-            margin-top: auto;
+        .drop-zone {
+            width: 100%;
+            border: 2px dashed var(--text-main);
+            padding: 30px 0;
             text-align: center;
-            padding: 30px 20px;
-            border-top: 2px solid var(--border-color);
-        }
-
-        footer a {
-            color: var(--text-secondary);
-            text-decoration: none;
-            font-size: 14px;
             font-weight: bold;
+            cursor: pointer;
+            margin-bottom: 20px;
+            background-color: rgba(255, 255, 255, 0.1);
+        }
+        .drop-zone:hover {
+            background-color: var(--title-bg);
+            color: var(--title-text);
+            border-color: var(--title-bg);
         }
 
-        footer a:hover {
-            color: var(--text-primary);
-            text-decoration: underline;
+        .terminal {
+            width: 100%;
+            background-color: var(--terminal-bg);
+            color: var(--terminal-text);
+            height: 100px;
+            border: 2px inset var(--window-border-dark);
+            padding: 10px;
+            font-size: 12px;
+            overflow-y: auto;
+            box-sizing: border-box;
+            text-align: left;
         }
 
-        @media (max-width: 768px) {
-            h1 { font-size: 24px; }
-            .features-section { flex-direction: column; }
+        /* Modal Alert */
+        .modal-overlay {
+            position: absolute;
+            top: 0; left: 0; right: 0; bottom: 0;
+            background: rgba(0,0,0,0.5);
+            display: none;
+            justify-content: center;
+            align-items: center;
+            z-index: 100;
+        }
+        .modal {
+            background-color: var(--window-bg);
+            border-top: 2px solid var(--window-border-light);
+            border-left: 2px solid var(--window-border-light);
+            border-right: 2px solid var(--window-border-dark);
+            border-bottom: 2px solid var(--window-border-dark);
+            padding: 20px;
+            width: 300px;
+            text-align: center;
+            color: var(--text-main);
+            box-shadow: 4px 4px 0px rgba(0,0,0,0.8);
+        }
+        .modal h3 {
+            margin-top: 0;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 10px;
+        }
+        .modal-btn {
+            display: inline-block;
+            margin-top: 20px;
+            padding: 8px 16px;
+            background-color: var(--window-bg);
+            border-top: 2px solid var(--window-border-light);
+            border-left: 2px solid var(--window-border-light);
+            border-right: 2px solid var(--window-border-dark);
+            border-bottom: 2px solid var(--window-border-dark);
+            color: var(--text-main);
+            font-weight: bold;
+            text-decoration: none;
+            cursor: pointer;
+        }
+        .modal-btn:active {
+            border-top: 2px solid var(--window-border-dark);
+            border-left: 2px solid var(--window-border-dark);
+            border-right: 2px solid var(--window-border-light);
+            border-bottom: 2px solid var(--window-border-light);
+        }
+        .tf-icon {
+            font-size: 24px;
         }
     </style>
 </head>
 <body>
-    <div class="lang-switcher">
-        <a href="#" class="active">[ EN ]</a> | <a href="index_zh.html">[ 中文 ]</a>
+    <div class="os-menu">
+        <div><span>System</span> <span>File</span> <span>Help</span></div>
+        <div><a href="index.html" style="text-decoration: underline;">EN</a> | <a href="index_zh.html">ZH</a></div>
     </div>
 
-    <header>
-        <div class="logo-container">
-            <img src="assets/logo.jpg" alt="PDFlux Logo" class="logo">
+    <div class="window">
+        <div class="title-bar">
+            <span>PDFlux_Engine.exe</span>
+            <div class="title-buttons">
+                <div class="title-btn">_</div>
+                <div class="title-btn">O</div>
+                <div class="title-btn">X</div>
+            </div>
         </div>
-        <h1>> Transform PDFs into EPUBs</h1>
-        <p class="subtitle">100% On-device. Fast, private, and brutalist.</p>
-        <a href="https://testflight.apple.com/join/nVmTyMGb" class="cta-button" target="_blank" rel="noopener noreferrer">EXECUTE_TESTFLIGHT</a>
-        <p class="tf-hint">sys.req: Apple TestFlight App</p>
-    </header>
+        <div class="window-content">
+            <img src="assets/logo.jpg" alt="PDFlux Logo" class="logo-img">
+            
+            <div class="drop-zone" id="dropZone" onclick="startSim()">
+                [ CLICK OR DROP PDF HERE ]
+            </div>
 
-    <div class="features-section">
-        <div class="feature-card">
-            <div class="feature-icon">[ SECURE ]</div>
-            <div class="feature-title">On-Device</div>
-            <div class="feature-desc">100% private. Extracts text and images from PDFs instantly. No server. No telemetry.</div>
-        </div>
-        <div class="feature-card">
-            <div class="feature-icon">[ AI ENGINE ]</div>
-            <div class="feature-title">Layout Analysis</div>
-            <div class="feature-desc">CoreML YOLO engine intelligently decodes reading order, columns, and figures offline.</div>
-        </div>
-        <div class="feature-card">
-            <div class="feature-icon">[ EPUB ]</div>
-            <div class="feature-title">Publisher-Grade</div>
-            <div class="feature-desc">Compiles beautiful, native Apple Books style EPUBs with responsive CSS architecture.</div>
+            <div class="terminal" id="term">
+                > System initialized.<br>
+                > Awaiting input...
+            </div>
         </div>
     </div>
 
-    <footer>
-        <a href="privacy.html">>> PRIVACY_POLICY</a>
-        <p style="color: var(--text-secondary); font-size: 12px; margin-top: 12px;">(c) 2026 PDFLUX_SYS.</p>
-    </footer>
+    <div class="modal-overlay" id="modalOverlay">
+        <div class="modal">
+            <h3>⚠️ SYSTEM ALERT</h3>
+            <p>Mobile Neural Engine Required.</p>
+            <p style="font-size: 12px;">To execute 100% offline YOLOv26 processing, you must route this task to an iOS device via TestFlight.</p>
+            <a href="https://testflight.apple.com/join/nVmTyMGb" class="modal-btn" target="_blank" rel="noopener noreferrer">
+                LAUNCH TESTFLIGHT
+            </a>
+            <div class="modal-btn" onclick="closeModal()" style="margin-left: 10px;">CANCEL</div>
+        </div>
+    </div>
 
+    <script>
+        const term = document.getElementById('term');
+        const modal = document.getElementById('modalOverlay');
+        let isRunning = false;
+
+        function startSim() {
+            if (isRunning) return;
+            isRunning = true;
+            term.innerHTML = "> Input received: document.pdf<br>";
+            
+            const logs = [
+                "Initializing CoreML...",
+                "Loading YOLOv26 Nano weights...",
+                "Scanning Document Layout...",
+                "ERROR: Neural Engine (ANE) not found on web browser.",
+                "Rerouting to native iOS protocol..."
+            ];
+
+            let delay = 500;
+            logs.forEach((log, index) => {
+                setTimeout(() => {
+                    term.innerHTML += "> " + log + "<br>";
+                    term.scrollTop = term.scrollHeight;
+                    if (index === logs.length - 1) {
+                        setTimeout(() => {
+                            modal.style.display = 'flex';
+                            isRunning = false;
+                        }, 800);
+                    }
+                }, delay);
+                delay += (Math.random() * 600 + 300);
+            });
+        }
+
+        function closeModal() {
+            modal.style.display = 'none';
+            term.innerHTML += "> Action aborted.<br>> Awaiting input...<br>";
+            term.scrollTop = term.scrollHeight;
+        }
+    </script>
 </body>
 </html>
