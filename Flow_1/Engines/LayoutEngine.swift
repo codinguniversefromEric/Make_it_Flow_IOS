@@ -141,7 +141,18 @@ enum LayoutEngine: Sendable {
                 
                 for block in sortedBlocks {
                     guard let adjustedRect = adjustedRectMap[block.id] else { continue }
-                    let expanded = adjustedRect.insetBy(dx: -5, dy: -5)
+                    var expanded = adjustedRect.insetBy(dx: -5, dy: -5)
+                    
+                    // 特殊處理：首字放大 (Drop Cap) 通常在段落左側，字數極少且字體明顯較大
+                    let isPotentialDropCap = frag.text.count <= 3 && frag.fontSize > 18
+                    if isPotentialDropCap {
+                        expanded = CGRect(
+                            x: adjustedRect.minX - 80,
+                            y: adjustedRect.minY - 20,
+                            width: adjustedRect.width + 85,
+                            height: adjustedRect.height + 40
+                        )
+                    }
                     
                     if expanded.contains(fragMid) {
                         let centerBlock = CGPoint(x: adjustedRect.midX, y: adjustedRect.midY)
@@ -495,13 +506,30 @@ enum LayoutEngine: Sendable {
         return role == .pageHeader || role == .pageFooter
     }
 
-    nonisolated static func shouldDrop(block: ParagraphBlock, pageHeight: CGFloat) -> Bool {
+    nonisolated static func shouldDrop(block: ParagraphBlock, pageHeight: CGFloat, baseFontSize: CGFloat? = nil) -> Bool {
         if shouldDrop(block.role) { return true }
         
-        // 🚨 安全機制：如果 YOLO 已經明確判定這是標題 (Heading/Title)，絕對不可以使用啟發式規則丟棄！
-        if block.role == .heading || block.role == .title { return false }
-        
         let text = block.unifiedText.trimmingCharacters(in: .whitespacesAndNewlines)
+        
+        var isFakeHeading = false
+        if block.role == .heading || block.role == .title {
+            let isAtExtremeTop = block.bounds.minY < pageHeight * 0.08 || block.bounds.maxY < pageHeight * 0.08
+            let isAtExtremeBottom = block.bounds.minY > pageHeight * 0.92 || block.bounds.maxY > pageHeight * 0.92
+            
+            if (isAtExtremeTop || isAtExtremeBottom) && text.count < 80 {
+                if let base = baseFontSize {
+                    let maxFontSize = block.fragments.map { $0.fontSize }.max() ?? 0
+                    if maxFontSize <= base * 1.05 {
+                        isFakeHeading = true
+                    }
+                }
+            }
+        }
+        
+        if isFakeHeading { return true }
+        
+        // 🚨 安全機制：如果 YOLO 已經明確判定這是標題 (Heading/Title)，絕對不可以使用啟發式規則丟棄！
+        if (block.role == .heading || block.role == .title) { return false }
         
         let isAtTop = block.bounds.minY < pageHeight * 0.15 || block.bounds.maxY < pageHeight * 0.15
         let isAtBottom = block.bounds.minY > pageHeight * 0.85 || block.bounds.maxY > pageHeight * 0.85
@@ -521,6 +549,17 @@ enum LayoutEngine: Sendable {
             if text.count < 80 {
                 if text.range(of: "^\\d+\\s*·?", options: .regularExpression) != nil || 
                    text.range(of: "·?\\s*\\d+$", options: .regularExpression) != nil {
+                    return true
+                }
+            }
+            
+            // 特徵 D: 極端邊緣的短文字，且沒有以句尾標點結束，通常是漏網的 running header
+            let isAtExtremeTop = block.bounds.minY < pageHeight * 0.06 || block.bounds.maxY < pageHeight * 0.06
+            let isAtExtremeBottom = block.bounds.minY > pageHeight * 0.94 || block.bounds.maxY > pageHeight * 0.94
+            if (isAtExtremeTop || isAtExtremeBottom) && text.count < 60 {
+                let endsWithPunctuation = text.range(of: "[.!?。！？”\"]$", options: .regularExpression) != nil
+                let isChapterTitle = text.range(of: "^第[一二三四五六七八九十百千萬萬0-9\\s]+[章部节讲篇]|^chapter\\s+\\d+|^part\\s+\\d+", options: [.regularExpression, .caseInsensitive]) != nil
+                if !endsWithPunctuation && !isChapterTitle {
                     return true
                 }
             }

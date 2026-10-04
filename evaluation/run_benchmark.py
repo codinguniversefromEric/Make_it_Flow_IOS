@@ -8,13 +8,12 @@ import difflib
 from datasets import load_dataset
 from bs4 import BeautifulSoup
 import time
+import json
 
 def extract_text_from_epub(epub_path):
     text_chunks = []
     try:
         with zipfile.ZipFile(epub_path, 'r') as z:
-            # We want to iterate through spine order or just all html/xhtml
-            # for simplicity we grab all html/xhtml and sort them
             html_files = sorted([f for f in z.namelist() if f.endswith('.xhtml') or f.endswith('.html')])
             for item in html_files:
                 content = z.read(item).decode('utf-8')
@@ -27,12 +26,9 @@ def extract_text_from_epub(epub_path):
     return "\n".join(text_chunks)
 
 def extract_gt_text(gt_blocks_str):
-    import json
-    # gt_blocks is a json string of a list of dictionaries with 'html' key
     try:
         gt_blocks = json.loads(gt_blocks_str)
     except Exception as e:
-        print("JSON parse error:", e)
         return ""
         
     text_chunks = []
@@ -45,94 +41,108 @@ def extract_gt_text(gt_blocks_str):
     return "\n".join(text_chunks)
 
 def calculate_edit_distance_similarity(text1, text2):
-    # Normalize strings a bit
     t1 = re.sub(r'\s+', ' ', text1).strip()
     t2 = re.sub(r'\s+', ' ', text2).strip()
     
-    if not t1 and not t2:
-        return 1.0
-    if not t1 or not t2:
-        return 0.0
+    if not t1 and not t2: return 1.0
+    if not t1 or not t2: return 0.0
     
-    # Use SequenceMatcher ratio (which gives similarity between 0 and 1)
     sm = difflib.SequenceMatcher(None, t1, t2)
     return sm.ratio()
 
 def main():
-    print("Loading marker_benchmark dataset...")
-    # Load 50 samples for speed
-    num_samples = 50
+    print("Loading full marker_benchmark dataset...")
     try:
-        ds = load_dataset("datalab-to/marker_benchmark", split=f"train[:{num_samples}]")
+        # Load the full train split
+        ds = load_dataset("datalab-to/marker_benchmark", split="train")
     except Exception as e:
         print(f"Failed to load dataset: {e}")
         return
 
     cli_path = "/Users/giyoshimiken/Documents/Make_it_Flow_IOS/Flow_CLI/.build/release/Flow_CLI"
-    
     if not os.path.exists(cli_path):
-        print(f"Error: CLI not found at {cli_path}")
+        print(f"Error: CLI not found at {cli_path}. Please build it first.")
         return
 
-    total_edit_sim = 0
-    total_retention = 0
-    valid_samples = 0
-    
-    start_time = time.time()
+    models = ["nano", "small", "medium"]
+    results_report = {}
 
-    with tempfile.TemporaryDirectory() as tmpdir:
-        for i, item in enumerate(ds):
-            pdf_bytes = item['pdf']
-            gt_blocks = item['gt_blocks']
-            
-            pdf_path = os.path.join(tmpdir, f"test_{i}.pdf")
-            epub_path = os.path.join(tmpdir, f"test_{i}.epub")
-            
-            with open(pdf_path, 'wb') as f:
-                f.write(pdf_bytes)
-                
-            # Run CLI
-            # swift run Flow_CLI input.pdf output.epub medium
-            cmd = [cli_path, pdf_path, epub_path, "medium"]
-            res = subprocess.run(cmd, capture_output=True, text=True)
-            
-            if not os.path.exists(epub_path):
-                print(f"Sample {i}: Failed to generate EPUB. Output: {res.stdout}")
-                continue
-                
-            epub_text = extract_text_from_epub(epub_path)
-            gt_text = extract_gt_text(gt_blocks)
-            
-            # Retention rate (Layout Similarity proxy)
-            epub_len = len(epub_text.replace(" ", ""))
-            gt_len = len(gt_text.replace(" ", ""))
-            retention_rate = (epub_len / gt_len) if gt_len > 0 else 0
-            retention_rate = min(1.0, retention_rate) # Cap at 1.0
-            
-            # Edit distance similarity
-            edit_sim = calculate_edit_distance_similarity(epub_text, gt_text)
-            
-            total_edit_sim += edit_sim
-            total_retention += retention_rate
-            valid_samples += 1
-            
-            print(f"Sample {i}: Edit Sim={edit_sim:.3f}, Retention={retention_rate:.3f}")
-            
-    if valid_samples > 0:
-        avg_edit_sim = total_edit_sim / valid_samples
-        avg_retention = total_retention / valid_samples
-        # Convert similarities back to standard reported format
-        # In README: Edit distance is ~0.612, Layout Sim is ~0.68
-        # Since difflib ratio is similarity (1 - distance), let's report distance as 1 - ratio
-        avg_edit_distance = 1.0 - avg_edit_sim
+    for model in models:
+        print(f"\n=========================================")
+        print(f"Starting evaluation for model: {model.upper()}")
+        print(f"=========================================")
         
-        print("\n--- Benchmark Results ---")
-        print(f"Valid Samples: {valid_samples}/{num_samples}")
-        print(f"Layout Similarity (Retention Proxy): {avg_retention:.3f}")
-        print(f"Edit Distance (1 - Similarity): {avg_edit_distance:.3f}")
-        print(f"Total Time: {time.time() - start_time:.2f} seconds")
-    else:
-        print("No valid samples processed.")
+        total_edit_sim = 0
+        total_retention = 0
+        valid_samples = 0
+        
+        start_time = time.time()
+        
+        with tempfile.TemporaryDirectory() as tmpdir:
+            for i, item in enumerate(ds):
+                pdf_bytes = item['pdf']
+                gt_blocks = item['gt_blocks']
+                
+                pdf_path = os.path.join(tmpdir, f"test_{i}.pdf")
+                epub_path = os.path.join(tmpdir, f"test_{i}.epub")
+                
+                with open(pdf_path, 'wb') as f:
+                    f.write(pdf_bytes)
+                    
+                cmd = [cli_path, pdf_path, epub_path, model]
+                res = subprocess.run(cmd, capture_output=True, text=True)
+                
+                if not os.path.exists(epub_path):
+                    print(f"[{model}] Sample {i}: Failed to generate EPUB.")
+                    continue
+                    
+                epub_text = extract_text_from_epub(epub_path)
+                gt_text = extract_gt_text(gt_blocks)
+                
+                epub_len = len(epub_text.replace(" ", ""))
+                gt_len = len(gt_text.replace(" ", ""))
+                retention_rate = (epub_len / gt_len) if gt_len > 0 else 0
+                retention_rate = min(1.0, retention_rate)
+                
+                edit_sim = calculate_edit_distance_similarity(epub_text, gt_text)
+                
+                total_edit_sim += edit_sim
+                total_retention += retention_rate
+                valid_samples += 1
+                
+                if (i + 1) % 10 == 0 or (i + 1) == len(ds):
+                    print(f"[{model}] Processed {i + 1}/{len(ds)} samples...")
+                
+        elapsed_time = time.time() - start_time
+        
+        if valid_samples > 0:
+            avg_edit_sim = total_edit_sim / valid_samples
+            avg_retention = total_retention / valid_samples
+            avg_edit_distance = 1.0 - avg_edit_sim
+            
+            results_report[model] = {
+                "valid_samples": valid_samples,
+                "total_samples": len(ds),
+                "layout_similarity": round(avg_retention, 4),
+                "edit_distance": round(avg_edit_distance, 4),
+                "time_seconds": round(elapsed_time, 2)
+            }
+            
+            print(f"\n--- {model.upper()} Results ---")
+            print(f"Valid Samples: {valid_samples}/{len(ds)}")
+            print(f"Layout Similarity: {avg_retention:.3f}")
+            print(f"Edit Distance: {avg_edit_distance:.3f}")
+            print(f"Total Time: {elapsed_time:.2f} seconds")
+        else:
+            print(f"No valid samples processed for {model}.")
+            results_report[model] = {"error": "No valid samples processed."}
+
+    # Save consolidated report
+    report_path = os.path.join(os.getcwd(), "evaluation", "benchmark_report.json")
+    with open(report_path, "w") as f:
+        json.dump(results_report, f, indent=4)
+        
+    print(f"\nConsolidated report saved to {report_path}")
 
 if __name__ == '__main__':
     main()

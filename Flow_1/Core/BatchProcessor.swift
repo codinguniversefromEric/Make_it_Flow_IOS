@@ -199,6 +199,92 @@ class BatchProcessor: ObservableObject {
                     if keep { filteredObs.append(obs) }
                 }
                 
+                // ═══════════════════════════════════════════
+                // STAGE 1.2: 碎裂表格與跨頁表格合併 (Table Merging)
+                // ═══════════════════════════════════════════
+                // 將區塊由上到下排序 (Vision 座標 maxY 越大代表在畫面上方)
+                filteredObs.sort { $0.boundingBox.maxY > $1.boundingBox.maxY }
+                
+                var mergedObs: [LayoutBlock] = []
+                var obsIdx = 0
+                while obsIdx < filteredObs.count {
+                    let obs = filteredObs[obsIdx]
+                    if obs.label == "Table" {
+                        var j = obsIdx + 1
+                        var currentRect = obs.boundingBox
+                        
+                        while j < filteredObs.count {
+                            let nextObs = filteredObs[j]
+                            // Vision 座標：下方區塊的 maxY 必須緊貼上方區塊的 minY
+                            let verticalGap = currentRect.minY - nextObs.boundingBox.maxY
+                            let horizontalOverlap = min(currentRect.maxX, nextObs.boundingBox.maxX) - max(currentRect.minX, nextObs.boundingBox.minX)
+                            
+                            // 允許稍微重疊到些微空白
+                            if verticalGap > -0.05 && verticalGap < 0.08 && horizontalOverlap > 0 {
+                                // 如果下一個也是 Table，或者是被包夾的扁平 Text
+                                if nextObs.label == "Table" || (nextObs.label == "Text" && nextObs.boundingBox.height < 0.06) {
+                                    currentRect = currentRect.union(nextObs.boundingBox)
+                                    j += 1
+                                    continue
+                                }
+                            }
+                            break
+                        }
+                        mergedObs.append(LayoutBlock(boundingBox: currentRect, label: "Table", confidence: obs.confidence))
+                        obsIdx = j
+                    } else {
+                        mergedObs.append(obs)
+                        obsIdx += 1
+                    }
+                }
+                filteredObs = mergedObs
+                
+                // ═══════════════════════════════════════════
+                // STAGE 1.5: 啟發式公式修正 (YOLO Label Correction)
+                // ═══════════════════════════════════════════
+                for i in 0..<filteredObs.count {
+                    let obs = filteredObs[i]
+                    if obs.label == "Section-header" || obs.label == "Title" || obs.label == "Text" {
+                        // PDFKit 使用左下角為原點，而 YOLO boundingBox 也是基於左下角 (Vision 標準)
+                        let pdfRect = CGRect(
+                            x: obs.boundingBox.minX * pageBounds.width,
+                            y: obs.boundingBox.minY * pageBounds.height,
+                            width: obs.boundingBox.width * pageBounds.width,
+                            height: obs.boundingBox.height * pageBounds.height
+                        )
+                        
+                        if let selection = page.selection(for: pdfRect), let text = selection.string {
+                            let textForMath = text.replacingOccurrences(of: "\n", with: " ")
+                            
+                            let hasEquals = textForMath.contains("=")
+                            let hasMath = textForMath.contains("+") || textForMath.contains("*") || textForMath.contains("/") || textForMath.contains("-")
+                            let isURL = textForMath.lowercased().contains("http") || textForMath.lowercased().contains("www.")
+                            
+                            // 特徵：方程式編號如 (6) 結尾，或包含希臘字母
+                            let hasEqNumber = textForMath.range(of: "\\(\\d+\\)\\s*$", options: .regularExpression) != nil
+                            let hasGreek = textForMath.range(of: "[α-ωΑ-Ωκχ]", options: .regularExpression) != nil
+                            
+                            // 若是標題類，條件較寬
+                            if obs.label == "Section-header" || obs.label == "Title" {
+                                if hasEquals || ((hasEqNumber || hasGreek) && hasMath) {
+                                    filteredObs[i] = LayoutBlock(boundingBox: obs.boundingBox, label: "Formula", confidence: obs.confidence)
+                                    AppLogger.shared.info("📐 啟發式修正: 將 YOLO 標題轉為 Formula (\(textForMath.prefix(20))...)")
+                                    continue
+                                }
+                            }
+                            
+                            // 若是內文類，條件嚴格 (避免把普通段落變成圖片)
+                            if obs.label == "Text" {
+                                if (hasEquals || hasEqNumber || hasGreek) && hasMath && !isURL && textForMath.count < 150 {
+                                    filteredObs[i] = LayoutBlock(boundingBox: obs.boundingBox, label: "Formula", confidence: obs.confidence)
+                                    AppLogger.shared.info("📐 啟發式修正: 將 YOLO 內文轉為 Formula (\(textForMath.prefix(20))...)")
+                                    continue
+                                }
+                            }
+                        }
+                    }
+                }
+                
                 // 分離視覺區域 vs 文字區域
                 var visualRegions: [VisualRegion] = []
                 var textRegionRects: [CGRect] = []
@@ -339,7 +425,26 @@ class BatchProcessor: ObservableObject {
                 }
                 textFragments = dedupedFragments
                 
-
+                // ═══════════════════════════════════════════
+                // STAGE 2.5: 掃描檔無文字層 Fallback (Scanned PDF)
+                // ═══════════════════════════════════════════
+                let textBlocksCount = filteredObs.filter { $0.label == "Text" || $0.label == "Section-header" || $0.label == "Title" || $0.label == "List-item" }.count
+                if textFragments.isEmpty && textBlocksCount > 0 {
+                    AppLogger.shared.info("⚠️ 偵測到純影像掃描檔 (無文字層)，啟動全視覺 fallback")
+                    for i in 0..<filteredObs.count {
+                        if filteredObs[i].label == "Text" || filteredObs[i].label == "Section-header" || filteredObs[i].label == "Title" || filteredObs[i].label == "List-item" {
+                            filteredObs[i] = LayoutBlock(boundingBox: filteredObs[i].boundingBox, label: "Picture", confidence: filteredObs[i].confidence)
+                        }
+                    }
+                    
+                    // 重新建立 visualRegions，把所有文字都當作圖片裁切
+                    visualRegions = []
+                    for obs in filteredObs {
+                        let cRect = VNImageRectForNormalizedRect(obs.boundingBox, Int(scaledSize.width), Int(scaledSize.height))
+                        let dRect = CGRect(x: cRect.minX, y: scaledSize.height - cRect.maxY, width: cRect.width, height: cRect.height)
+                        visualRegions.append(VisualRegion(label: obs.label, rect: dRect, confidence: obs.confidence))
+                    }
+                }
                 
                 // OCR Fallback and extra logics removed for YOLO 99% accuracy transition
                 
@@ -450,7 +555,7 @@ class BatchProcessor: ObservableObject {
                 
                 // 文字段落 → Markdown
                 for block in paragraphs {
-                    if LayoutEngine.shouldDrop(block: block, pageHeight: scaledSize.height) { continue }
+                    if LayoutEngine.shouldDrop(block: block, pageHeight: scaledSize.height, baseFontSize: styleRegistry.bodyFontSize) { continue }
                     
                     // 📖 擷取文件標題
                     if block.role == .title {
@@ -475,7 +580,7 @@ class BatchProcessor: ObservableObject {
                 
                 // 📖 智慧分章
                 if pageIndex > 0 {
-                    if let firstBlock = paragraphs.first(where: { !LayoutEngine.shouldDrop(block: $0, pageHeight: scaledSize.height) }),
+                    if let firstBlock = paragraphs.first(where: { !LayoutEngine.shouldDrop(block: $0, pageHeight: scaledSize.height, baseFontSize: styleRegistry.bodyFontSize) }),
                        firstBlock.role == .title || firstBlock.role == .heading {
                         
                         let text = firstBlock.unifiedText.lowercased()
