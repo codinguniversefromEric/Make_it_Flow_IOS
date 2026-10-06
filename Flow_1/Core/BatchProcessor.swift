@@ -430,19 +430,55 @@ class BatchProcessor: ObservableObject {
                 // ═══════════════════════════════════════════
                 let textBlocksCount = filteredObs.filter { $0.label == "Text" || $0.label == "Section-header" || $0.label == "Title" || $0.label == "List-item" }.count
                 if textFragments.isEmpty && textBlocksCount > 0 {
-                    AppLogger.shared.info("⚠️ 偵測到純影像掃描檔 (無文字層)，啟動全視覺 fallback")
-                    for i in 0..<filteredObs.count {
-                        if filteredObs[i].label == "Text" || filteredObs[i].label == "Section-header" || filteredObs[i].label == "Title" || filteredObs[i].label == "List-item" {
-                            filteredObs[i] = LayoutBlock(boundingBox: filteredObs[i].boundingBox, label: "Picture", confidence: filteredObs[i].confidence)
-                        }
-                    }
+                    AppLogger.shared.info("⚠️ 偵測到純影像掃描檔 (無文字層)，啟動 OCR fallback")
                     
-                    // 重新建立 visualRegions，把所有文字都當作圖片裁切
-                    visualRegions = []
-                    for obs in filteredObs {
-                        let cRect = VNImageRectForNormalizedRect(obs.boundingBox, Int(scaledSize.width), Int(scaledSize.height))
-                        let dRect = CGRect(x: cRect.minX, y: scaledSize.height - cRect.maxY, width: cRect.width, height: cRect.height)
-                        visualRegions.append(VisualRegion(label: obs.label, rect: dRect, confidence: obs.confidence))
+                    let request = VNRecognizeTextRequest()
+                    request.recognitionLevel = .accurate
+                    request.recognitionLanguages = ["zh-Hant", "zh-Hans", "en-US"]
+                    request.usesLanguageCorrection = true
+                    
+                    let handler = VNImageRequestHandler(cgImage: validCGImg, options: [:])
+                    do {
+                        try handler.perform([request])
+                        if let observations = request.results {
+                            for obs in observations {
+                                guard let text = obs.topCandidates(1).first?.string, !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { continue }
+                                
+                                let ocrRect = obs.boundingBox
+                                
+                                var isInsideTextBlock = false
+                                for yoloObs in filteredObs {
+                                    if yoloObs.label == "Text" || yoloObs.label == "Section-header" || yoloObs.label == "Title" || yoloObs.label == "List-item" {
+                                        let intersection = ocrRect.intersection(yoloObs.boundingBox)
+                                        if !intersection.isNull {
+                                            let ocrArea = ocrRect.width * ocrRect.height
+                                            if ocrArea > 0 && (intersection.width * intersection.height) / ocrArea > 0.3 {
+                                                isInsideTextBlock = true
+                                                break
+                                            }
+                                        }
+                                    }
+                                }
+                                
+                                if isInsideTextBlock {
+                                    let cRect = VNImageRectForNormalizedRect(ocrRect, Int(scaledSize.width), Int(scaledSize.height))
+                                    let displayRect = CGRect(x: cRect.minX, y: scaledSize.height - cRect.maxY, width: cRect.width, height: cRect.height)
+                                    
+                                    let fragment = TextFragment(
+                                        text: text,
+                                        bounds: displayRect,
+                                        fontSize: displayRect.height * 0.8,
+                                        fontName: nil,
+                                        isBold: false,
+                                        isItalic: false,
+                                        colorHex: "#000000"
+                                    )
+                                    textFragments.append(fragment)
+                                }
+                            }
+                        }
+                    } catch {
+                        AppLogger.shared.error("OCR failed: \(error)")
                     }
                 }
                 

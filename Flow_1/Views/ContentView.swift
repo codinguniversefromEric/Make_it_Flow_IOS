@@ -69,7 +69,20 @@ struct ContentView: View {
         .onOpenURL { url in
             if url.pathExtension.lowercased() == "pdf" {
                 documentName = url.deletingPathExtension().lastPathComponent
-                vm.handlePickedPDF(url: url)
+                let isSecurityScoped = url.startAccessingSecurityScopedResource()
+                let tempURL = FileManager.default.temporaryDirectory.appendingPathComponent(url.lastPathComponent)
+                do {
+                    if FileManager.default.fileExists(atPath: tempURL.path) {
+                        try FileManager.default.removeItem(at: tempURL)
+                    }
+                    try FileManager.default.copyItem(at: url, to: tempURL)
+                    if isSecurityScoped { url.stopAccessingSecurityScopedResource() }
+                    vm.handlePickedPDF(url: tempURL)
+                } catch {
+                    if isSecurityScoped { url.stopAccessingSecurityScopedResource() }
+                    vm.errorMessage = "Failed to access shared PDF: \(error.localizedDescription)"
+                    vm.showErrorAlert = true
+                }
             }
         }
     }
