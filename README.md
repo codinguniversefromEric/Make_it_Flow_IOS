@@ -1,7 +1,7 @@
 # ePdfUB
 
 <p align="center">
-  <img src="assets/logo.jpg" alt="ePdfUB Logo" width="200">
+  <img src="assets/ePdfUB icon" alt="ePdfUB Logo" width="200">
 </p>
  
 
