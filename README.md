@@ -1,11 +1,11 @@
-# PDFlux
+# ePdfUB
 
 <p align="center">
-  <img src="assets/logo.jpg" alt="PDFlux Logo" width="200">
+  <img src="assets/logo.jpg" alt="ePdfUB Logo" width="200">
 </p>
  
 
-**PDFlux** is a 100% on-device iOS App & CLI tool that converts PDF documents into beautifully formatted, highly readable EPUB files. Powered by CoreML YOLO models and PDFKit, it intelligently reconstructs complex document architectures entirely offline.
+**ePdfUB** is a 100% on-device iOS App & CLI tool that converts PDF documents into beautifully formatted, highly readable EPUB files. Powered by CoreML YOLO models and PDFKit, it intelligently reconstructs complex document architectures entirely offline.
 
 [![Download on the App Store](https://developer.apple.com/assets/elements/badges/download-on-the-app-store.svg)](https://apps.apple.com/tw/app/make-it-flow/id6780764422?l=en-GB)
 
@@ -15,7 +15,7 @@
 * macOS 14.0+ / Xcode 15.0+ / iOS 17.0+
 
 ### Running the iOS App
-1. Clone the repository: `git clone https://github.com/codinguniversefromEric/PDFlux.git`
+1. Clone the repository: `git clone https://github.com/codinguniversefromEric/Make_it_Flow_IOS.git`
 2. Open `Flow_1.xcodeproj` in Xcode.
 3. Select a simulator or physical device, and press `Cmd + R` to build and run. (YOLO models are built-in, no external downloads required)
 
@@ -35,7 +35,7 @@ flowchart LR
     C --> E["Batch Processor"]
     D -.->|nano / small / medium| E
     
-    E --> F["PDFlux Core Engine"]
+    E --> F["ePdfUB Core Engine"]
     F --> G["Generate EPUB / TOC"]
     G --> H[/"Save to output.epub"/]
     
@@ -83,7 +83,7 @@ The project comes pre-packaged with three lightweight CoreML models based on [ha
 | **YOLOv26 Small** | **~0.06 seconds** | **0.721** | **0.407** | Good balance of speed and precision for standard devices. |
 | **YOLOv26 Medium** | **~0.07 seconds** | **0.728** | **0.403** | Alternative for complex, multi-column academic papers with dense tables and charts. |
 
-*Note: Benchmarks were measured on Apple Silicon (M-series) against the full Hugging Face `marker_benchmark` dataset (2,138 documents). The built-in Swift engine merges deep layout bounding boxes with native PDFKit data, generating accurate EPUB architectures orders of magnitude faster than Python-based alternatives. **PDFlux trades ~10-15% raw text retention (by converting complex tables and scanned PDFs into high-fidelity images instead of relying on heavy OCR) in exchange for lightning-fast, 100% offline mobile processing and publisher-grade visual aesthetics.***
+*Note: Benchmarks were measured on Apple Silicon (M-series) against the full Hugging Face `marker_benchmark` dataset (2,138 documents). The built-in Swift engine merges deep layout bounding boxes with native PDFKit data, generating accurate EPUB architectures orders of magnitude faster than Python-based alternatives. **ePdfUB trades ~10-15% raw text retention (by converting complex tables and scanned PDFs into high-fidelity images instead of relying on heavy OCR) in exchange for lightning-fast, 100% offline mobile processing and publisher-grade visual aesthetics.***
 
 ## ⚖️ License & Acknowledgements
 
@@ -91,4 +91,4 @@ The project comes pre-packaged with three lightweight CoreML models based on [ha
 * YOLO Framework: **YOLOv26**
 * Model Weights: [hantian/yolo-doclaynet](https://huggingface.co/hantian/yolo-doclaynet/tree/main)
 
-*⚠️ Note: The "PDFlux" brand name, App Store presence, and UI/UX designs are the exclusive property of the author. Repackaging and publishing the app to the App Store without authorization is strictly prohibited.*
+*⚠️ Note: The "ePdfUB" brand name, App Store presence, and UI/UX designs are the exclusive property of the author. Repackaging and publishing the app to the App Store without authorization is strictly prohibited.*
