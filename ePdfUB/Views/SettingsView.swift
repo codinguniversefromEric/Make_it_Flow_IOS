@@ -52,6 +52,17 @@ struct SettingsView: View {
                             .foregroundStyle(.secondary)
                     }
                     
+                    Link(destination: URL(string: "https://codinguniversefromEric.github.io/Make_it_Flow_IOS/privacy.html")!) {
+                        HStack {
+                            Label("Privacy Policy", systemImage: "hand.raised.fill")
+                                .foregroundStyle(.primary)
+                            Spacer()
+                            Image(systemName: "arrow.up.right")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                    
                     Link(destination: URL(string: "https://github.com/codinguniversefromEric/ePdfUB.git")!) {
                         HStack {
                             Label("Open Source & Licenses", systemImage: "link")
