@@ -1,6 +1,6 @@
 #!/bin/bash
 cd ePdfUB_CLI || exit
-echo "🏗 Building PDFlux CLI (Release mode)..."
+echo "🏗 Building ePdfUB CLI (Release mode)..."
 swift build -c release
 
 CLI_PATH="$(swift build -c release --show-bin-path)/ePdfUB_CLI"

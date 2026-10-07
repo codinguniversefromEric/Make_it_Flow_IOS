@@ -1,0 +1,58 @@
+Loading marker_benchmark dataset...
+Warning: You are sending unauthenticated requests to the HF Hub. Please set a HF_TOKEN to enable higher rate limits and faster downloads.
+Sample 0: Edit Sim=0.989, Retention=1.000
+Sample 1: Edit Sim=0.966, Retention=1.000
+Sample 2: Edit Sim=0.361, Retention=1.000
+Sample 3: Edit Sim=0.403, Retention=0.807
+Sample 4: Edit Sim=0.976, Retention=1.000
+Sample 5: Edit Sim=0.905, Retention=0.860
+Sample 6: Edit Sim=0.926, Retention=1.000
+Sample 7: Edit Sim=0.979, Retention=1.000
+Sample 8: Edit Sim=0.963, Retention=1.000
+Sample 9: Edit Sim=0.979, Retention=1.000
+Sample 10: Edit Sim=0.492, Retention=0.897
+Sample 11: Edit Sim=0.754, Retention=1.000
+Sample 12: Edit Sim=0.973, Retention=1.000
+Sample 13: Edit Sim=0.870, Retention=1.000
+Sample 14: Edit Sim=0.947, Retention=1.000
+Sample 15: Edit Sim=0.808, Retention=0.800
+Sample 16: Edit Sim=0.979, Retention=1.000
+Sample 17: Edit Sim=0.630, Retention=1.000
+Sample 18: Edit Sim=0.903, Retention=1.000
+Sample 19: Edit Sim=0.159, Retention=1.000
+Sample 20: Edit Sim=0.006, Retention=0.016
+Sample 21: Edit Sim=0.013, Retention=0.035
+Sample 22: Edit Sim=0.006, Retention=0.013
+Sample 23: Edit Sim=0.900, Retention=1.000
+Sample 24: Edit Sim=0.982, Retention=0.994
+Sample 25: Edit Sim=0.019, Retention=0.037
+Sample 26: Edit Sim=0.693, Retention=1.000
+Sample 27: Edit Sim=0.004, Retention=0.016
+Sample 28: Edit Sim=0.004, Retention=0.019
+Sample 29: Edit Sim=0.964, Retention=1.000
+Sample 30: Edit Sim=0.990, Retention=1.000
+Sample 31: Edit Sim=0.542, Retention=1.000
+Sample 32: Edit Sim=0.969, Retention=1.000
+Sample 33: Edit Sim=0.982, Retention=1.000
+Sample 34: Edit Sim=0.869, Retention=1.000
+Sample 35: Edit Sim=0.883, Retention=1.000
+Sample 36: Edit Sim=0.974, Retention=1.000
+Sample 37: Edit Sim=0.427, Retention=1.000
+Sample 38: Edit Sim=0.519, Retention=1.000
+Sample 39: Edit Sim=0.988, Retention=1.000
+Sample 40: Edit Sim=0.790, Retention=1.000
+Sample 41: Edit Sim=0.923, Retention=1.000
+Sample 42: Edit Sim=0.847, Retention=1.000
+Sample 43: Edit Sim=0.627, Retention=1.000
+Sample 44: Edit Sim=0.509, Retention=1.000
+Sample 45: Edit Sim=0.981, Retention=1.000
+Sample 46: Edit Sim=0.752, Retention=0.940
+Sample 47: Edit Sim=0.853, Retention=0.996
+Sample 48: Edit Sim=0.000, Retention=0.085
+Sample 49: Edit Sim=0.000, Retention=0.028
+
+--- Benchmark Results ---
+Valid Samples: 50/50
+Layout Similarity (Retention Proxy): 0.831
+Edit Distance (1 - Similarity): 0.320
+Total Time: 165.54 seconds

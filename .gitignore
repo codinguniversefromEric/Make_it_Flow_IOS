@@ -6,5 +6,5 @@
 !*.mlpackage/**/*.bin
 
 # Secrets
-Flow_1/Core/Secrets.swift
-Flow_1/Config.xcconfig
+ePdfUB/Core/Secrets.swift
+ePdfUB/Config.xcconfig

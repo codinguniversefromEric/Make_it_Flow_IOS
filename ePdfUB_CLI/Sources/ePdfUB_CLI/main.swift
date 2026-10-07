@@ -5,7 +5,7 @@ import PDFKit
 func main() async {
     let args = CommandLine.arguments
     guard args.count >= 3 else {
-        print("Usage: PDFlux_CLI <input.pdf> <output.epub> [nano|small|medium]")
+        print("Usage: ePdfUB_CLI <input.pdf> <output.epub> [nano|small|medium]")
         exit(1)
     }
     
@@ -25,7 +25,7 @@ func main() async {
         exit(1)
     }
     
-    print("🚀 啟動 PDFlux_CLI: 正在處理 \(inputURL.lastPathComponent)")
+    print("🚀 啟動 ePdfUB_CLI: 正在處理 \(inputURL.lastPathComponent)")
     print("🧠 載入視覺引擎: \(selectedModel.rawValue)")
     AppSettings.shared.selectedModel = selectedModel
     let processor = BatchProcessor()
