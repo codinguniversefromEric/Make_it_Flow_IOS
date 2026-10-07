@@ -1,6 +1,6 @@
 import re
 
-filepath = "Flow_1/Views/DebugPageView.swift"
+filepath = "ePdfUB/Views/DebugPageView.swift"
 with open(filepath, "r") as f:
     content = f.read()
 

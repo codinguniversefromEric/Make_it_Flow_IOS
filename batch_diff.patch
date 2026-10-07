@@ -1,7 +1,7 @@
-diff --git a/Flow_1/Core/BatchProcessor.swift b/Flow_1/Core/BatchProcessor.swift
+diff --git a/ePdfUB/Core/BatchProcessor.swift b/ePdfUB/Core/BatchProcessor.swift
 index ee2e374..b157326 100644
---- a/Flow_1/Core/BatchProcessor.swift
-+++ b/Flow_1/Core/BatchProcessor.swift
+--- a/ePdfUB/Core/BatchProcessor.swift
++++ b/ePdfUB/Core/BatchProcessor.swift
 @@ -94,7 +94,6 @@ class BatchProcessor: ObservableObject {
              // 📖 These mutable variables are fully owned by the detached task to avoid data races
              var detectedTitle = initialTitle

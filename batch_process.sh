@@ -1,9 +1,9 @@
 #!/bin/bash
-cd Flow_CLI || exit
+cd ePdfUB_CLI || exit
 echo "🏗 Building PDFlux CLI (Release mode)..."
 swift build -c release
 
-CLI_PATH="$(swift build -c release --show-bin-path)/Flow_CLI"
+CLI_PATH="$(swift build -c release --show-bin-path)/ePdfUB_CLI"
 cd ..
 
 if [ ! -f "$CLI_PATH" ]; then

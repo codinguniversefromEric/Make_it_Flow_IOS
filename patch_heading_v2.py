@@ -1,6 +1,6 @@
 import re
 
-with open("Flow_1/Core/BatchProcessor.swift", "r") as f:
+with open("ePdfUB/Core/BatchProcessor.swift", "r") as f:
     content = f.read()
 
 old_heading = re.search(r'// 🛡️ 啟發式標題升級.*?// H2 不能太長\n\s*paragraphs\[i\]\.role = \.heading\n\s*\}\n\s*\}\n\s*\}', content, re.DOTALL)
@@ -20,6 +20,6 @@ if old_heading:
                 }"""
     content = content.replace(old_heading.group(0), new_heading)
 
-with open("Flow_1/Core/BatchProcessor.swift", "w") as f:
+with open("ePdfUB/Core/BatchProcessor.swift", "w") as f:
     f.write(content)
 

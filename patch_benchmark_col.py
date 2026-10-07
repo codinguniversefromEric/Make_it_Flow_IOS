@@ -1,6 +1,6 @@
 import re
 
-filepath = "Flow_CLI/Sources/RobustnessBenchmark/main.swift"
+filepath = "ePdfUB_CLI/Sources/RobustnessBenchmark/main.swift"
 with open(filepath, "r") as f:
     content = f.read()
 

@@ -1,6 +1,6 @@
 import re
 
-filepath = "Flow_1/Core/BatchProcessor.swift"
+filepath = "ePdfUB/Core/BatchProcessor.swift"
 with open(filepath, "r") as f:
     content = f.read()
 
@@ -20,7 +20,7 @@ with open(filepath, "w") as f:
     f.write(content)
 
 
-filepath = "Flow_1/Engines/EPUBSynthesizer.swift"
+filepath = "ePdfUB/Engines/EPUBSynthesizer.swift"
 with open(filepath, "r") as f:
     content = f.read()
 

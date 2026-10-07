@@ -1,6 +1,6 @@
 import re
 
-filepath = "Flow_1/Core/BatchProcessor.swift"
+filepath = "ePdfUB/Core/BatchProcessor.swift"
 with open(filepath, "r") as f:
     content = f.read()
 
@@ -19,7 +19,7 @@ content = content.replace(
 with open(filepath, "w") as f:
     f.write(content)
 
-filepath = "Flow_1/Views/DebugPageView.swift"
+filepath = "ePdfUB/Views/DebugPageView.swift"
 with open(filepath, "r") as f:
     content = f.read()
 

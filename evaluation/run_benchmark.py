@@ -59,7 +59,7 @@ def main():
         print(f"Failed to load dataset: {e}")
         return
 
-    cli_path = "/Users/giyoshimiken/Documents/Make_it_Flow_IOS/Flow_CLI/.build/release/Flow_CLI"
+    cli_path = "/Users/giyoshimiken/Documents/ePdfUB_IOS/ePdfUB_CLI/.build/release/ePdfUB_CLI"
     if not os.path.exists(cli_path):
         print(f"Error: CLI not found at {cli_path}. Please build it first.")
         return
