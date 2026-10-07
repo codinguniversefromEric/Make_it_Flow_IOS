@@ -268,22 +268,57 @@
         </div>
     </div>
 
-    <script>
+        <script>
         const term = document.getElementById('term');
         const modal = document.getElementById('modalOverlay');
+        const dropZone = document.getElementById('dropZone');
         let isRunning = false;
 
-        function startSim() {
+        // Prevent default drag behaviors
+        ['dragenter', 'dragover', 'dragleave', 'drop'].forEach(eventName => {
+            dropZone.addEventListener(eventName, preventDefaults, false);
+            document.body.addEventListener(eventName, preventDefaults, false);
+        });
+
+        function preventDefaults(e) {
+            e.preventDefault();
+            e.stopPropagation();
+        }
+
+        // Highlight drop zone
+        ['dragenter', 'dragover'].forEach(eventName => {
+            dropZone.addEventListener(eventName, () => dropZone.style.background = 'var(--window-border-shadow)', false);
+        });
+        ['dragleave', 'drop'].forEach(eventName => {
+            dropZone.addEventListener(eventName, () => dropZone.style.background = 'var(--window-bg)', false);
+        });
+
+        // Handle drop
+        dropZone.addEventListener('drop', handleDrop, false);
+
+        function handleDrop(e) {
+            const dt = e.dataTransfer;
+            const files = dt.files;
+            
+            if (files && files.length > 0) {
+                startSim(files[0].name);
+            } else {
+                startSim();
+            }
+        }
+
+        function startSim(filename) {
             if (isRunning) return;
             isRunning = true;
-            term.innerHTML = "> 接收檔案: document.pdf<br>";
+            const displayName = filename || "document.pdf";
+            term.innerHTML = "> Input received: " + displayName + "<br>";
             
             const logs = [
-                "啟動 CoreML 引擎...",
-                "載入 YOLOv26 Nano 權重模型...",
-                "正在進行深度版面掃描...",
-                "錯誤: 網頁端缺少 Apple 晶片硬體加速支援。",
-                "正在重新導向至 iOS 原生應用程式..."
+                "Initializing CoreML...",
+                "Loading YOLOv26 Nano weights...",
+                "Scanning Document Layout...",
+                "ERROR: Neural Engine (ANE) not found on web browser.",
+                "Rerouting to native iOS protocol..."
             ];
 
             let delay = 500;
@@ -304,7 +339,7 @@
 
         function closeModal() {
             modal.style.display = 'none';
-            term.innerHTML += "> 處理已中止。<br>> 等待輸入指令...<br>";
+            term.innerHTML += "> Action aborted.<br>> Awaiting input...<br>";
             term.scrollTop = term.scrollHeight;
         }
     </script>
