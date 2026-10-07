@@ -8,3 +8,9 @@
 # Secrets
 ePdfUB/Core/Secrets.swift
 ePdfUB/Config.xcconfig
+
+# Build directories
+.build/
+DerivedData/
+*.xcodeproj/xcuserdata/
+*.xcodeproj/project.xcworkspace/
