@@ -2,6 +2,7 @@ import SwiftUI
 import UniformTypeIdentifiers
 import PDFKit
 import QuickLook
+import StoreKit
 
 enum AnimationState {
     case idle
@@ -18,7 +19,14 @@ struct ContentView: View {
     @State private var fileToDelete: LibraryItem? = nil
     @State private var showBrutalistSuccess = false
     @State private var successFileURL: URL? = nil
+    @Environment(\.requestReview) private var requestReview
 
+    @AppStorage("successfulConversionCount")
+    private var successfulConversionCount = 0
+
+    @AppStorage("hasRequestedReviewPrompt")
+    private var hasRequestedReviewPrompt = false
+    
     private let dateFormatter: DateFormatter = {
         let df = DateFormatter()
         df.dateFormat = "MMM dd"
@@ -57,10 +65,25 @@ struct ContentView: View {
             }
         }
         .onChange(of: vm.batchProcessor.exportedFileURL) { newURL in
-            if let epubURL = newURL {
-                successFileURL = epubURL
-                vm.finishConversion(epubURL: epubURL)
-                showBrutalistSuccess = true
+            guard let epubURL = newURL else { return }
+
+            successFileURL = epubURL
+            vm.finishConversion(epubURL: epubURL)
+            showBrutalistSuccess = true
+
+            // Count successful conversions.
+            successfulConversionCount += 1
+
+            // Request a review after the second successful conversion.
+            guard successfulConversionCount >= 2,
+                  !hasRequestedReviewPrompt else {
+                return
+            }
+
+            hasRequestedReviewPrompt = true
+
+            DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
+                requestReview()
             }
         }
         .alert("Conversion Error", isPresented: $vm.showErrorAlert) {
@@ -71,18 +94,30 @@ struct ContentView: View {
         .onOpenURL { url in
             if url.pathExtension.lowercased() == "pdf" {
                 documentName = url.deletingPathExtension().lastPathComponent
+
                 let isSecurityScoped = url.startAccessingSecurityScopedResource()
-                let tempURL = FileManager.default.temporaryDirectory.appendingPathComponent(url.lastPathComponent)
+                let tempURL = FileManager.default.temporaryDirectory
+                    .appendingPathComponent(url.lastPathComponent)
+
                 do {
                     if FileManager.default.fileExists(atPath: tempURL.path) {
                         try FileManager.default.removeItem(at: tempURL)
                     }
+
                     try FileManager.default.copyItem(at: url, to: tempURL)
-                    if isSecurityScoped { url.stopAccessingSecurityScopedResource() }
+
+                    if isSecurityScoped {
+                        url.stopAccessingSecurityScopedResource()
+                    }
+
                     vm.handlePickedPDF(url: tempURL)
                 } catch {
-                    if isSecurityScoped { url.stopAccessingSecurityScopedResource() }
-                    vm.errorMessage = "Failed to access shared PDF: \(error.localizedDescription)"
+                    if isSecurityScoped {
+                        url.stopAccessingSecurityScopedResource()
+                    }
+
+                    vm.errorMessage =
+                        "Failed to access shared PDF: \(error.localizedDescription)"
                     vm.showErrorAlert = true
                 }
             }
