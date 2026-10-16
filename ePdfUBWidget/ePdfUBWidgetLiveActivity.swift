@@ -1,163 +1,310 @@
+
 import ActivityKit
 import WidgetKit
 import SwiftUI
 import AppIntents
 
+// MARK: - Activity Attributes
+
 public struct ePdfUBWidgetAttributes: ActivityAttributes, Sendable {
+
     public struct ContentState: Codable, Hashable, Sendable {
         public var progress: Double
         public var statusMessage: String
+
+        public init(
+            progress: Double,
+            statusMessage: String
+        ) {
+            self.progress = progress
+            self.statusMessage = statusMessage
+        }
     }
 
     public var documentName: String
+
+    public init(documentName: String) {
+        self.documentName = documentName
+    }
 }
 
-struct ePdfUBWidgetLiveActivity: Widget {
-    var body: some WidgetConfiguration {
-        ActivityConfiguration(for: ePdfUBWidgetAttributes.self) { context in
-            // Lock screen / Notification Center UI
-            HStack(spacing: 16) {
-                Image(systemName: "doc.text.viewfinder")
-                    .font(.system(size: 32))
-                    .foregroundStyle(.tint)
+// MARK: - E-Ink Style
 
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(context.attributes.documentName)
-                        .font(.headline)
-                        .lineLimit(1)
-                    Text(context.state.statusMessage)
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
-                }
-                Spacer()
+private enum EInk {
 
-                ZStack {
-                    Circle()
-                        .stroke(Color.gray.opacity(0.2), lineWidth: 4)
-                    Circle()
-                        .trim(from: 0, to: context.state.progress)
-                        .stroke(.tint, style: StrokeStyle(lineWidth: 4, lineCap: .round))
-                        .rotationEffect(.degrees(-90))
-                    Text("\(Int(context.state.progress * 100))%")
-                        .font(.system(size: 10, weight: .bold))
-                        .monospacedDigit()
-                }
-                .frame(width: 44, height: 44)
+    static let black = Color.black
+    static let white = Color.white
+    static let gray = Color.gray.opacity(0.25)
+
+    static func progress(_ value: Double) -> Double {
+        min(max(value, 0), 1)
+    }
+
+    static func percentage(_ value: Double) -> Int {
+        Int(progress(value) * 100)
+    }
+}
+
+// MARK: - Progress Bar
+
+private struct EInkProgressBar: View {
+
+    let progress: Double
+    var height: CGFloat = 3
+    var foreground: Color = .white
+    var track: Color = .gray.opacity(0.25)
+
+    var body: some View {
+        GeometryReader { geometry in
+            ZStack(alignment: .leading) {
+
+                Capsule()
+                    .fill(track)
+
+                Capsule()
+                    .fill(foreground)
+                    .frame(
+                        width: geometry.size.width *
+                            EInk.progress(progress)
+                    )
             }
-            .padding()
-            // Let the system materialize the background rather than forcing a flat tint —
-            // keeps correct contrast in both light and dark mode.
-            .activityBackgroundTint(Color(UIColor.secondarySystemBackground))
-            .activitySystemActionForegroundColor(.primary)
+        }
+        .frame(height: height)
+        .accessibilityLabel("Conversion progress")
+        .accessibilityValue(
+            "\(EInk.percentage(progress)) percent"
+        )
+    }
+}
+
+// MARK: - Live Activity Widget
+
+struct ePdfUBWidgetLiveActivity: Widget {
+
+    var body: some WidgetConfiguration {
+
+        ActivityConfiguration(
+            for: ePdfUBWidgetAttributes.self
+        ) { context in
+
+            // MARK: Lock Screen
+
+            VStack(spacing: 12) {
+
+                HStack(spacing: 12) {
+
+                    Image(systemName: "doc.text")
+                        .font(.system(size: 23))
+                        .foregroundStyle(EInk.black)
+
+                    VStack(alignment: .leading, spacing: 4) {
+
+                        Text(context.attributes.documentName)
+                            .font(
+                                .system(
+                                    size: 15,
+                                    weight: .medium
+                                )
+                            )
+                            .foregroundStyle(EInk.black)
+                            .lineLimit(1)
+
+                        Text(context.state.statusMessage)
+                            .font(.system(size: 12))
+                            .foregroundStyle(
+                                EInk.black.opacity(0.6)
+                            )
+                            .lineLimit(1)
+                    }
+
+                    Spacer(minLength: 4)
+
+                    Text(
+                        "\(EInk.percentage(context.state.progress))%"
+                    )
+                    .font(
+                        .system(
+                            size: 16,
+                            weight: .medium,
+                            design: .monospaced
+                        )
+                    )
+                    .foregroundStyle(EInk.black)
+                    .monospacedDigit()
+                }
+
+                EInkProgressBar(
+                    progress: context.state.progress,
+                    height: 3,
+                    foreground: EInk.black,
+                    track: EInk.gray
+                )
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 14)
+            .background(EInk.white)
+            .activityBackgroundTint(EInk.white)
+            .activitySystemActionForegroundColor(EInk.black)
 
         } dynamicIsland: { context in
+
             DynamicIsland {
-                // Use leading/trailing instead of leaving them empty — this is what gives
-                // the Dynamic Island its "one integrated shape" feel rather than a single
-                // block crammed into .bottom.
+
+                // MARK: Expanded Leading
+
+                // MARK: - Expanded Leading
+
                 DynamicIslandExpandedRegion(.leading) {
-                    // 左側：精緻的文件圖標 (模仿 Apple Music 專輯封面排版)
-                    ZStack {
-                        RoundedRectangle(cornerRadius: 11, style: .continuous)
-                            .fill(LinearGradient(colors: [Color.accentColor.opacity(0.8), Color.accentColor.opacity(0.4)], startPoint: .topLeading, endPoint: .bottomTrailing))
-                            .frame(width: 40, height: 40)
-                        
-                        Image(systemName: "doc.text.viewfinder")
-                            .font(.system(size: 18, weight: .semibold))
-                            .foregroundStyle(.white)
-                    }
-                    .padding(.leading, 6)
+                    Image(systemName: "doc.text")
+                        .font(.system(size: 30, weight: .regular))
+                        .foregroundStyle(EInk.white)
+                        .frame(width: 40, height: 50)
+                        .padding(.leading, 0)
+                        .accessibilityHidden(true)
                 }
+
+                // MARK: - Expanded Trailing
+
+                // MARK: - Expanded Trailing
+
                 DynamicIslandExpandedRegion(.trailing) {
-                    // 右側：半透明的圓形取消按鈕
-                    Button(intent: CancelConversionIntent()) {
-                        Image(systemName: "xmark")
-                            .font(.system(size: 14, weight: .bold))
-                            .foregroundStyle(.white)
-                            .frame(width: 40, height: 40)
-                            .background(Color.white.opacity(0.15))
-                            .clipShape(Circle())
+                    if context.state.progress < 1 {
+                        Button(intent: CancelConversionIntent()) {
+                            ZStack {
+                                Circle()
+                                    .stroke(.white.opacity(0.15), lineWidth: 1.5)
+
+                                Circle()
+                                    .trim(
+                                        from: 0,
+                                        to: min(max(context.state.progress, 0), 1)
+                                    )
+                                    .stroke(
+                                        .white.opacity(0.9),
+                                        style: StrokeStyle(
+                                            lineWidth: 1.5,
+                                            lineCap: .round
+                                        )
+                                    )
+                                    .rotationEffect(.degrees(-90))
+
+                                Image(systemName: "xmark")
+                                    .font(.system(size: 15, weight: .medium))
+                                    .foregroundStyle(.white.opacity(0.9))
+                            }
+                            .frame(width: 40, height: 50)
+                            .contentShape(Circle())
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel("Cancel conversion")
+                        .accessibilityValue(
+                            "\(Int(min(max(context.state.progress, 0), 1) * 100)) percent"
+                        )
                     }
-                    .buttonStyle(.plain)
-                    .padding(.trailing, 6)
                 }
+
+                // MARK: - Expanded Center
+
                 DynamicIslandExpandedRegion(.center) {
-                    // 留空
+                    Text(context.attributes.documentName)
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundStyle(.white.opacity(0.9))
+                        .lineLimit(1)
+                        .truncationMode(.middle)
                 }
+
+                // MARK: - Expanded Bottom
+
                 DynamicIslandExpandedRegion(.bottom) {
-                    // 底部：主資訊與高質感進度條
-                    VStack(spacing: 16) {
-                        HStack(alignment: .top) {
-                            VStack(alignment: .leading, spacing: 4) {
-                                Text(context.attributes.documentName)
-                                    .font(.headline)
-                                    .lineLimit(1)
-                                
-                                Text(context.state.statusMessage)
-                                    .font(.subheadline)
-                                    .foregroundStyle(.secondary)
-                                    .lineLimit(1)
-                            }
-                            Spacer(minLength: 16)
-                            
-                            Text("\(Int(context.state.progress * 100))%")
-                                .font(.title2.weight(.bold).monospacedDigit())
-                                .foregroundStyle(Color.accentColor)
-                                .contentTransition(.numericText())
-                        }
-                        
-                        GeometryReader { geo in
-                            ZStack(alignment: .leading) {
-                                Capsule()
-                                    .fill(Color.gray.opacity(0.15))
-                                    .frame(height: 10)
-                                
-                                Capsule()
-                                    .fill(LinearGradient(colors: [Color.accentColor, Color.accentColor.opacity(0.8)], startPoint: .leading, endPoint: .trailing))
-                                    .frame(width: max(0, geo.size.width * context.state.progress), height: 10)
-                                    .shadow(color: Color.accentColor.opacity(0.4), radius: 4, x: 0, y: 0)
-                            }
-                        }
-                        .frame(height: 10)
-                    }
-                    .padding(.top, 12)
-                    .padding(.bottom, 8)
-                    .padding(.horizontal, 4)
+                    EmptyView()
                 }
             } compactLeading: {
-                Image(systemName: "doc.viewfinder")
-                    .foregroundStyle(.tint)
+
+                Image(systemName: "doc.text")
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundStyle(EInk.white)
+                    .frame(width: 18, height: 18)
+
             } compactTrailing: {
-                Text("\(Int(context.state.progress * 100))%")
-                    .font(.caption2.weight(.bold))
+
+                Text("\(EInk.percentage(context.state.progress))%")
+                    .font(
+                        .system(
+                            size: 10,
+                            weight: .medium,
+                            design: .monospaced
+                        )
+                    )
+                    .foregroundStyle(EInk.white)
                     .monospacedDigit()
-                    .foregroundStyle(.tint)
+                    .fixedSize(horizontal: true, vertical: false)
+
             } minimal: {
-                Image(systemName: "doc.viewfinder")
-                    .foregroundStyle(.tint)
+
+                Image(systemName: "doc.text")
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundStyle(EInk.white)
             }
-            .keylineTint(Color.accentColor)
+            .keylineTint(EInk.white)
         }
     }
 }
+
 // MARK: - Previews
 
-#Preview("Expanded", as: .dynamicIsland(.expanded), using: ePdfUBWidgetAttributes(documentName: "Medical_Report_2026.pdf")) {
+#Preview(
+    "Expanded",
+    as: .dynamicIsland(.expanded),
+    using: ePdfUBWidgetAttributes(
+        documentName: "Medical_Report.pdf"
+    )
+) {
     ePdfUBWidgetLiveActivity()
 } contentStates: {
-    ePdfUBWidgetAttributes.ContentState(progress: 0.45, statusMessage: "Processing Page 5 of 12...")
-    ePdfUBWidgetAttributes.ContentState(progress: 1.0, statusMessage: "Done!")
+
+    ePdfUBWidgetAttributes.ContentState(
+        progress: 0.45,
+        statusMessage: "Processing page 5 of 12"
+    )
+
+    ePdfUBWidgetAttributes.ContentState(
+        progress: 1.0,
+        statusMessage: "Done"
+    )
 }
 
-#Preview("Compact", as: .dynamicIsland(.compact), using: ePdfUBWidgetAttributes(documentName: "Medical_Report_2026.pdf")) {
+#Preview(
+    "Compact",
+    as: .dynamicIsland(.compact),
+    using: ePdfUBWidgetAttributes(
+        documentName: "Medical_Report.pdf"
+    )
+) {
     ePdfUBWidgetLiveActivity()
 } contentStates: {
-    ePdfUBWidgetAttributes.ContentState(progress: 0.45, statusMessage: "Processing Page 5 of 12...")
+
+    ePdfUBWidgetAttributes.ContentState(
+        progress: 0.45,
+        statusMessage: "Processing page 5 of 12"
+    )
+    ePdfUBWidgetAttributes.ContentState(
+        progress: 1,
+        statusMessage: "Done"
+    )
 }
 
-#Preview("Lock Screen", as: .content, using: ePdfUBWidgetAttributes(documentName: "Medical_Report_2026.pdf")) {
+#Preview(
+    "Lock Screen",
+    as: .content,
+    using: ePdfUBWidgetAttributes(
+        documentName: "Medical_Report.pdf"
+    )
+) {
     ePdfUBWidgetLiveActivity()
 } contentStates: {
-    ePdfUBWidgetAttributes.ContentState(progress: 0.45, statusMessage: "Processing Page 5 of 12...")
+
+    ePdfUBWidgetAttributes.ContentState(
+        progress: 0.45,
+        statusMessage: "Processing page 5 of 12"
+    )
 }
