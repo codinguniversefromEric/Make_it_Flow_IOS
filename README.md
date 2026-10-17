@@ -89,4 +89,4 @@ The project comes pre-packaged with three lightweight CoreML models based on [ha
 
 * Code: [AGPL-3.0](LICENSE)
 * Model Weights: [hantian/yolo-doclaynet](https://huggingface.co/hantian/yolo-doclaynet) (YOLOv26, DocLayNet) — AGPL-3.0, trained with [Ultralytics](https://github.com/ultralytics/ultralytics)
-* Brand assets (name, icon, `assets/`): not covered by AGPL, all rights reserved
+* Brand assets (name, icon, `assets/ePdfUB icon.jpg`): not covered by AGPL, all rights reserved
