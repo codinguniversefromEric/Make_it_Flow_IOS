@@ -87,8 +87,6 @@ The project comes pre-packaged with three lightweight CoreML models based on [ha
 
 ## ⚖️ License & Acknowledgements
 
-* Code License: **AGPL-3.0**
-* YOLO Framework: **YOLOv26**
-* Model Weights: [hantian/yolo-doclaynet](https://huggingface.co/hantian/yolo-doclaynet/tree/main)
-
-*⚠️ Note: The "ePdfUB" brand name, App Store presence, and UI/UX designs are the exclusive property of the author. Repackaging and publishing the app to the App Store without authorization is strictly prohibited.*
+* Code: [AGPL-3.0](LICENSE)
+* Model Weights: [hantian/yolo-doclaynet](https://huggingface.co/hantian/yolo-doclaynet) (YOLOv26, DocLayNet) — AGPL-3.0, trained with [Ultralytics](https://github.com/ultralytics/ultralytics)
+* Brand assets (name, icon, `assets/`): not covered by AGPL, all rights reserved
