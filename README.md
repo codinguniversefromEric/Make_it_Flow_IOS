@@ -15,7 +15,7 @@
 * macOS 14.0+ / Xcode 15.0+ / iOS 17.0+
 
 ### Running the iOS App
-1. Clone the repository: `git clone https://github.com/codinguniversefromEric/ePdfUB_IOS.git`
+1. Clone the repository: `git clone https://github.com/codinguniversefromEric/Make_it_Flow_IOS.git`
 2. Open `ePdfUB.xcodeproj` in Xcode.
 3. Select a simulator or physical device, and press `Cmd + R` to build and run. (YOLO models are built-in, no external downloads required)
 
