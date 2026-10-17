@@ -3,6 +3,7 @@
 <p align="center">
   <img src="assets/ePdfUB icon.jpg" alt="ePdfUB Logo" width="200">
 </p>
+[![License: AGPL v3](https://img.shields.io/badge/License-AGPL_v3-blue.svg)](LICENSE)
  
 
 **ePdfUB** is a 100% on-device iOS App & CLI tool that converts PDF documents into beautifully formatted, highly readable EPUB files. Powered by CoreML YOLO models and PDFKit, it intelligently reconstructs complex document architectures entirely offline.
