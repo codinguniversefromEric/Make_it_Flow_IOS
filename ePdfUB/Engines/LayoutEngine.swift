@@ -179,8 +179,8 @@ enum LayoutEngine: Sendable {
         for block in sortedBlocks {
             guard let frags = blockFragmentsMap[block.id], !frags.isEmpty else { continue }
             let sortedFrags = frags.sorted { a, b in
-                let yA = round(a.bounds.midY / 10.0)
-                let yB = round(b.bounds.midY / 10.0)
+                let yA = round(readingLineY(a) / 10.0)
+                let yB = round(readingLineY(b) / 10.0)
                 if yA == yB {
                     return a.bounds.minX < b.bounds.minX
                 }
@@ -200,8 +200,8 @@ enum LayoutEngine: Sendable {
         if !unassignedFragments.isEmpty {
             // 按 Y 軸排序，然後用 proximity grouping 組裝成段落
             let ySortedOrphans = unassignedFragments.sorted { a, b in
-                let yA = round(a.bounds.midY / 10.0)
-                let yB = round(b.bounds.midY / 10.0)
+                let yA = round(readingLineY(a) / 10.0)
+                let yB = round(readingLineY(b) / 10.0)
                 if yA == yB {
                     return a.bounds.minX < b.bounds.minX
                 }
@@ -417,17 +417,27 @@ enum LayoutEngine: Sendable {
     }
 
     /// 從一組連續的文字碎片建構一個 ParagraphBlock
+    private nonisolated static func readingLineY(_ fragment: TextFragment) -> CGFloat {
+        // A drop cap extends below the baseline of its first line.
+        if fragment.fontSize > 0, fragment.bounds.height > fragment.fontSize * 2.5 {
+            return fragment.bounds.minY + fragment.fontSize * 0.75
+        }
+        return fragment.bounds.midY
+    }
+
     private nonisolated static func buildParagraphBlock(from fragments: [TextFragment], role: SemanticRole) -> ParagraphBlock {
         // 先對每個 fragment 執行 OCR 亂碼修復 (數學符號等)
         let sanitizedFragments = fragments.map { frag -> TextFragment in
+            let text = sanitizeScientificOCR(frag.text)
             return TextFragment(
-                text: sanitizeScientificOCR(frag.text),
+                text: text,
                 bounds: frag.bounds,
                 fontSize: frag.fontSize,
                 fontName: frag.fontName,
                 isBold: frag.isBold,
                 isItalic: frag.isItalic,
-                colorHex: frag.colorHex
+                colorHex: frag.colorHex,
+                footnoteMarkers: text == frag.text ? frag.footnoteMarkers : []
             )
         }
 
@@ -461,6 +471,14 @@ enum LayoutEngine: Sendable {
         )
     }
 
+    private nonisolated static func isEastAsianBoundary(_ character: Character) -> Bool {
+        guard !character.isASCII else { return false }
+        return String(character).range(
+            of: #"[\p{Han}\p{Hiragana}\p{Katakana}\u3001-\u303F\uFF01\uFF08\uFF09\uFF0C\uFF0E\uFF1A\uFF1B\uFF1F]"#,
+            options: .regularExpression
+        ) != nil
+    }
+
     /// 修復跨行斷字 (e.g., "hyperdon-" + "tia" → "hyperdontia")
     private nonisolated static func recoverHyphenation(lines: [String]) -> String {
         var parts: [String] = []
@@ -473,6 +491,9 @@ enum LayoutEngine: Sendable {
                let lastChar = lastPart.dropLast().last, lastChar.isLetter {
                 // 發現斷字：移除末尾連字號，直接拼接下一行的第一個詞
                 parts[parts.count - 1] = String(lastPart.dropLast()) + trimmed
+            } else if let last = parts.last?.last, let first = trimmed.first,
+                      isEastAsianBoundary(last) || isEastAsianBoundary(first) {
+                parts[parts.count - 1] += trimmed
             } else {
                 parts.append(trimmed)
             }
@@ -500,75 +521,123 @@ enum LayoutEngine: Sendable {
         return clean
     }
     
-    // MARK: - Temporary Helpers for Transition to KMP
+    nonisolated static func shouldDrop(block: ParagraphBlock, pageHeight: CGFloat) -> Bool {
+        // Check the entire block so a paragraph that extends into the margin survives.
+        let isInTopMargin = block.bounds.maxY <= pageHeight * 0.10
+        let isInBottomMargin = block.bounds.minY >= pageHeight * 0.90
+        guard pageHeight > 0, isInTopMargin || isInBottomMargin else { return false }
 
-    nonisolated static func shouldDrop(_ role: SemanticRole) -> Bool {
-        return role == .pageHeader || role == .pageFooter
-    }
-
-    nonisolated static func shouldDrop(block: ParagraphBlock, pageHeight: CGFloat, baseFontSize: CGFloat? = nil) -> Bool {
-        if shouldDrop(block.role) { return true }
-        
         let text = block.unifiedText.trimmingCharacters(in: .whitespacesAndNewlines)
-        
-        var isFakeHeading = false
-        if block.role == .heading || block.role == .title {
-            let isAtExtremeTop = block.bounds.minY < pageHeight * 0.08 || block.bounds.maxY < pageHeight * 0.08
-            let isAtExtremeBottom = block.bounds.minY > pageHeight * 0.92 || block.bounds.maxY > pageHeight * 0.92
-            
-            if (isAtExtremeTop || isAtExtremeBottom) && text.count < 80 {
-                if let base = baseFontSize {
-                    let maxFontSize = block.fragments.map { $0.fontSize }.max() ?? 0
-                    if maxFontSize <= base * 1.05 {
-                        isFakeHeading = true
-                    }
-                }
-            }
+        if text.range(of: "^\\d+$", options: .regularExpression) != nil {
+            return true
         }
-        
-        if isFakeHeading { return true }
-        
-        // 🚨 安全機制：如果 YOLO 已經明確判定這是標題 (Heading/Title)，絕對不可以使用啟發式規則丟棄！
-        if (block.role == .heading || block.role == .title) { return false }
-        
-        let isAtTop = block.bounds.minY < pageHeight * 0.15 || block.bounds.maxY < pageHeight * 0.15
-        let isAtBottom = block.bounds.minY > pageHeight * 0.85 || block.bounds.maxY > pageHeight * 0.85
-        
-        if isAtTop || isAtBottom {
-            // 特徵 A: 純數字頁碼
-            if text.range(of: "^\\d+$", options: .regularExpression) != nil {
-                return true
-            }
-            
-            // 特徵 B: 帶有特殊分隔符的大寫字母 (如 T H E  B O O K)
-            if text.range(of: "(?:[A-Z]\\s+){3,}[A-Z]", options: .regularExpression) != nil {
-                return true
-            }
-            
-            // 特徵 C: 短字串且包含疑似頁碼的數字結尾/開頭
-            if text.count < 80 {
-                if text.range(of: "^\\d+\\s*·?", options: .regularExpression) != nil || 
-                   text.range(of: "·?\\s*\\d+$", options: .regularExpression) != nil {
-                    return true
-                }
-            }
-            
-            // 特徵 D: 極端邊緣的短文字，且沒有以句尾標點結束，通常是漏網的 running header
-            let isAtExtremeTop = block.bounds.minY < pageHeight * 0.06 || block.bounds.maxY < pageHeight * 0.06
-            let isAtExtremeBottom = block.bounds.minY > pageHeight * 0.94 || block.bounds.maxY > pageHeight * 0.94
-            if (isAtExtremeTop || isAtExtremeBottom) && text.count < 60 {
-                let endsWithPunctuation = text.range(of: "[.!?。！？”\"]$", options: .regularExpression) != nil
-                let isChapterTitle = text.range(of: "^第[一二三四五六七八九十百千萬萬0-9\\s]+[章部节讲篇]|^chapter\\s+\\d+|^part\\s+\\d+", options: [.regularExpression, .caseInsensitive]) != nil
-                if !endsWithPunctuation && !isChapterTitle {
-                    return true
-                }
-            }
-        }
-        
-        return false
+        guard text.count < 80 else { return false }
+
+        // Running titles often combine a folio with a centered dot, or use spaced capitals.
+        // A bare leading or trailing number can also be a list item, note, or contents entry.
+        let folio = "^\\d+\\s*·\\s*\\p{Lu}[^.!?]*$|^\\p{Lu}[^.!?]*\\s*·\\s*\\d+$"
+        let runningTitle = "^(?:[A-Z]\\s+){3,}[A-Z]$"
+        return text.range(of: folio, options: .regularExpression) != nil ||
+            text.range(of: runningTitle, options: .regularExpression) != nil
     }
 
-    nonisolated static func toHTML(block: ParagraphBlock, baseFontSize: CGFloat) -> String {
+    nonisolated static func separateTrailingNotes(
+        in blocks: [ParagraphBlock],
+        pageHeight: CGFloat
+    ) -> [ParagraphBlock] {
+        let markers = Set(blocks.flatMap { block in
+            block.fragments.flatMap { fragment in
+                fragment.footnoteMarkers.map { (fragment.text as NSString).substring(with: $0) }
+            }
+        })
+        return blocks.flatMap { block -> [ParagraphBlock] in
+            guard block.role == .body, block.fragments.count > 1 else { return [block] }
+            let rows = block.fragments
+            for index in rows.indices.dropFirst() {
+                let first = rows[index]
+                let prefix = first.text.trimmingCharacters(in: .whitespacesAndNewlines)
+                guard first.bounds.minY > pageHeight * 0.74,
+                      let markerRange = prefix.range(of: #"^[0-9]{1,3}(?=\s)"#, options: .regularExpression),
+                      markers.contains(String(prefix[markerRange])) else { continue }
+                let bodySize = rows[..<index].map(\.fontSize).max() ?? 0
+                let trailingRows = rows[index...]
+                guard trailingRows.allSatisfy({ $0.fontSize <= bodySize * 0.85 }) else { continue }
+                return [
+                    buildParagraphBlock(from: Array(rows[..<index]), role: .body),
+                    buildParagraphBlock(from: Array(trailingRows), role: .footnote)
+                ]
+            }
+            return [block]
+        }
+    }
+
+    struct FootnoteLinks {
+        var notes: [Int: String] = [:]
+        var references: [Int: [String: String]] = [:]
+    }
+
+    nonisolated static func matchFootnotes(
+        in blocks: inout [ParagraphBlock],
+        pageIndex: Int,
+        pageHeight: CGFloat
+    ) -> FootnoteLinks {
+        var candidates: [String: [Int]] = [:]
+        var references: [String: [(block: Int, fontSize: CGFloat)]] = [:]
+        for (index, block) in blocks.enumerated() {
+            // Preserve uncertain model detections in reading order.
+            if block.role == .footnote { blocks[index].role = .body }
+            guard block.role == .footnote || block.role == .body ||
+                  block.role == .listItem || block.role == .pageFooter else { continue }
+
+            let text = block.unifiedText.trimmingCharacters(in: .whitespacesAndNewlines)
+            if let range = text.range(of: #"^(?:[0-9]{1,3}(?=[.)]?\s)|[*†‡](?=\s*\S))"#,
+                                      options: .regularExpression),
+               text[range.upperBound...].contains(where: \.isLetter) {
+                candidates[String(text[range]), default: []].append(index)
+            }
+
+            guard block.role != .pageFooter, !shouldDrop(block: block, pageHeight: pageHeight) else { continue }
+            for fragment in block.fragments {
+                let source = fragment.text as NSString
+                for range in fragment.footnoteMarkers {
+                    references[source.substring(with: range), default: []].append((index, fragment.fontSize))
+                }
+            }
+        }
+
+        var links = FootnoteLinks()
+        for (marker, matches) in references {
+            guard matches.count == 1, let reference = matches.first else { continue }
+            let source = blocks[reference.block]
+            let eligible = (candidates[marker] ?? []).filter { index in
+                let note = blocks[index]
+                return note.bounds.minY >= source.bounds.maxY &&
+                    note.dominantFontSize <= reference.fontSize * 0.85 &&
+                    !shouldDrop(block: note, pageHeight: pageHeight)
+            }
+            guard eligible.count == 1, let index = eligible.first else { continue }
+            let id = "footnote-p\(pageIndex + 1)-\(index + 1)"
+            links.notes[index] = id
+            links.references[reference.block, default: [:]][marker] = id
+        }
+        // A note must have a reference outside every other note candidate.
+        var nestedTargets: Set<String> = []
+        for index in links.notes.keys {
+            if let nested = links.references.removeValue(forKey: index) {
+                nestedTargets.formUnion(nested.values)
+            }
+        }
+        links.notes = links.notes.filter { !nestedTargets.contains($0.value) }
+        for index in links.notes.keys { blocks[index].role = .footnote }
+        return links
+    }
+
+    nonisolated static func toHTML(
+        block: ParagraphBlock,
+        baseFontSize: CGFloat,
+        footnoteID: String? = nil,
+        footnoteLinks: [String: String] = [:]
+    ) -> String {
         // 如果是視覺區塊 (圖片、圖表、公式、表格)，直接輸出原始 HTML (不跳脫、不加 span)
         if block.role == .picture || block.role == .formula || block.role == .table {
             return block.fragments.map { $0.text }.joined(separator: "\n") + "\n"
@@ -576,12 +645,9 @@ enum LayoutEngine: Sendable {
         
         var innerHTML = ""
         for (index, frag) in block.fragments.enumerated() {
-            var escapedText = EPUBSynthesizer.sanitizeForXML(frag.text)
-            
-            // 安全移除尾隨換行符，避免 HTML 直譯錯誤，並將連續空白壓縮為單一空白 (處理 PDF 全齊行造成的詭異多餘空白)
-            escapedText = escapedText.replacingOccurrences(of: "\n", with: "")
-            escapedText = escapedText.replacingOccurrences(of: "\r", with: "")
-            escapedText = escapedText.replacingOccurrences(of: " +", with: " ", options: .regularExpression)
+            // 去除 PDF 行首與行尾的排版空白，再合併行內連續空白。
+            var text = frag.text.trimmingCharacters(in: .whitespacesAndNewlines)
+                .replacingOccurrences(of: #"[ \t\r\n]+"#, with: " ", options: .regularExpression)
             
             // 使用相對比例 (em)，允許閱讀器自適應字體大小
             let safeBase = baseFontSize > 0 ? baseFontSize : 12.0
@@ -595,7 +661,11 @@ enum LayoutEngine: Sendable {
             let cappedEmSize = min(emSize, maxEmSize)
             let formattedEm = String(format: "%.2f", cappedEmSize)
             
-            if abs(cappedEmSize - 1.0) > 0.15 {
+            // Reflowable body text follows the reader's chosen size. PDF font changes
+            // within a line must not shrink an entire body span.
+            let usesBodySize = block.role != .title && block.role != .heading &&
+                block.role != .caption && block.role != .footnote
+            if !usesBodySize && abs(cappedEmSize - 1.0) > 0.15 {
                 style += "font-size: \(formattedEm)em;"
             }
             
@@ -627,21 +697,19 @@ enum LayoutEngine: Sendable {
             
             if index < block.fragments.count - 1 {
                 let nextFrag = block.fragments[index + 1]
-                let currentRaw = escapedText.trimmingCharacters(in: .whitespaces)
                 let nextRaw = nextFrag.text.trimmingCharacters(in: .whitespacesAndNewlines)
                 
-                if let cLast = currentRaw.last, let nFirst = nextRaw.first {
+                if let cLast = text.last, let nFirst = nextRaw.first {
                     // 英文斷字修復 (e.g., hyphen- + ated -> hyphenated)
-                    if cLast == "-" && currentRaw.count > 1 {
-                        let charBeforeHyphen = currentRaw[currentRaw.index(before: currentRaw.index(before: currentRaw.endIndex))]
+                    if cLast == "-", let charBeforeHyphen = text.dropLast().last {
                         if charBeforeHyphen.isASCII && charBeforeHyphen.isLetter && nFirst.isASCII && nFirst.isLetter {
-                            escapedText = String(currentRaw.dropLast())
+                            text.removeLast()
                             removedHyphen = true
                             needsTrailingSpace = false
                         }
                     }
                     
-                    if !removedHyphen {
+                    if !removedHyphen && !isEastAsianBoundary(cLast) && !isEastAsianBoundary(nFirst) {
                         // 針對 URL 被切斷的情況，如果兩端都是 ASCII，但不都是字母/數字，可能是 URL 斷行 (例如 = 和 &)，不加空白
                         let cAlnum = cLast.isLetter || cLast.isNumber
                         let nAlnum = nFirst.isLetter || nFirst.isNumber
@@ -657,14 +725,16 @@ enum LayoutEngine: Sendable {
                         }
                     }
                 }
-            } else if block.role == .body {
-                // 如果是段落最後一行，通常不需要加空白，除非它是跨頁拼接的一部分
-                // 交由 stitchCrossPageParagraphs 處理跨頁邏輯
             }
-            
+
+            let escapedText = renderFootnoteReferences(in: text, fragment: frag, links: footnoteLinks)
             innerHTML += "<span style=\"\(style)\">\(escapedText)</span>" + (needsTrailingSpace ? " " : "")
         }
         
+        if let footnoteID {
+            return "<aside epub:type=\"footnote\" id=\"\(footnoteID)\"><p class=\"doc-body\">\(innerHTML)</p><p><a href=\"#\(footnoteID)-ref\">Return to text</a></p></aside>\n"
+        }
+
         switch block.role {
         case .title:
             return "<h1 class=\"doc-title\">\(innerHTML)</h1>\n"
@@ -681,6 +751,30 @@ enum LayoutEngine: Sendable {
         }
     }
     
+    private nonisolated static func renderFootnoteReferences(
+        in text: String,
+        fragment: TextFragment,
+        links: [String: String]
+    ) -> String {
+        let source = fragment.text as NSString
+        var html = ""
+        var cursor = text.startIndex
+        for range in fragment.footnoteMarkers {
+            let marker = source.substring(with: range)
+            guard let id = links[marker] else { continue }
+            let prefix = source.substring(to: range.location)
+                .replacingOccurrences(of: #"^\s+"#, with: "", options: .regularExpression)
+                .replacingOccurrences(of: #"[ \t\r\n]+"#, with: " ", options: .regularExpression)
+            guard text.hasPrefix(prefix),
+                  let start = text.index(text.startIndex, offsetBy: prefix.count, limitedBy: text.endIndex),
+                  start >= cursor, text[start...].hasPrefix(marker) else { continue }
+            html += EPUBSynthesizer.sanitizeForXML(String(text[cursor..<start]))
+            html += "<sup><a epub:type=\"noteref\" id=\"\(id)-ref\" href=\"#\(id)\">\(marker)</a></sup>"
+            cursor = text.index(start, offsetBy: marker.count)
+        }
+        return html + EPUBSynthesizer.sanitizeForXML(String(text[cursor...]))
+    }
+
     // MARK: - 跨頁段落縫合 (Cross-Page Stitching)
     
     /// 基於啟發式法則 (標點符號與大小寫) 自動縫合因 PDF 換頁而被強制截斷的段落

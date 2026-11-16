@@ -50,6 +50,9 @@ final class EPUBSynthesizer: Sendable {
         // 處理未跳脫的 & 符號
         clean = Self.ampRegex.stringByReplacingMatches(in: clean, options: [], range: NSRange(location: 0, length: clean.utf16.count), withTemplate: "&amp;")
         
+        // Adjacent list items emitted by the layout engine belong to the same list.
+        clean = clean.replacingOccurrences(of: "</li></ul>\n<ul class=\"doc-list\"><li class=\"doc-list-item\">",
+                                           with: "</li>\n<li class=\"doc-list-item\">")
         return clean
     }
 
@@ -180,13 +183,13 @@ final class EPUBSynthesizer: Sendable {
             let fullHTML = """
             <?xml version="1.0" encoding="utf-8"?>
             <!DOCTYPE html>
-            <html xmlns="http://www.w3.org/1999/xhtml">
+            <html xmlns="http://www.w3.org/1999/xhtml" xmlns:epub="http://www.idpf.org/2007/ops">
             <head>
                 <title>\(sanitizeForXML(title))</title>
                 <meta charset="utf-8"/>
                 <style>
                     body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; line-height: 1.6; padding: 4%; color: #1c1c1e; background-color: #ffffff; }
-                    p { margin-bottom: 1.2em; text-indent: 0; text-align: justify; overflow-wrap: break-word; word-break: break-word; }
+                    p { margin-bottom: 1.2em; text-indent: 0; text-align: left; overflow-wrap: break-word; word-break: break-word; }
                     h1, h2, h3 { font-weight: 700; letter-spacing: -0.02em; color: #000000; margin-top: 1.8em; margin-bottom: 0.8em; }
                     h1.doc-title { font-size: 2.2em; text-align: center; margin-bottom: 1.5em; }
                     img { max-width: 100%; height: auto; display: block; margin: 30px auto; border-radius: 12px; }
@@ -293,19 +296,32 @@ final class EPUBSynthesizer: Sendable {
     // MARK: - 書籍專用通道：多章節引擎
 
     /// 建立多章節書籍的 EPUB 檔案
-    nonisolated static func createBookEPUB(title: String, fullHTML: String, assetsURL: URL) -> URL? {
+    nonisolated static func createBookEPUB(
+        title: String,
+        fullHTML: String,
+        assetsURL: URL,
+        chapterTitles: [String]? = nil,
+        outlineDepths: [Int]? = nil
+    ) -> URL? {
         let fm = FileManager.default
         let epubURL = fm.temporaryDirectory.appendingPathComponent("\(title).epub")
         let bookUUID = UUID().uuidString
         
         do {
             var rawChapters = fullHTML.components(separatedBy: "<!-- CHAPTER_SPLIT -->")
-            rawChapters = rawChapters.filter { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+            let sourceTitles = chapterTitles.flatMap { $0.count == rawChapters.count ? $0 : nil }
+            let nativeOutline = sourceTitles != nil && outlineDepths?.count == rawChapters.count
+                ? outlineDepths : nil
+            if sourceTitles == nil {
+                rawChapters = rawChapters.filter { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+            }
             
             var manifestItems = ""
             var spineItems = ""
             var navLinks = ""
             var ncxNavPoints = ""
+            var hasPart = false
+            var navigationOrder = 0
             var chapterEntries: [EPUBArchiveEntry] = []
             
             for (index, chapterHTML) in rawChapters.enumerated() {
@@ -313,8 +329,8 @@ final class EPUBSynthesizer: Sendable {
                 let fileName = "\(chapterId).xhtml"
                 
                 // Try to extract a title from the first heading tag in this chapter
-                var safeTitle = "Chapter \(index + 1)"
-                if let headingMatch = headingRegex.firstMatch(in: chapterHTML, options: [], range: NSRange(location: 0, length: chapterHTML.utf16.count)) {
+                var safeTitle = sanitizeForXML(sourceTitles?[index] ?? "Chapter \(index + 1)")
+                if sourceTitles == nil, let headingMatch = headingRegex.firstMatch(in: chapterHTML, options: [], range: NSRange(location: 0, length: chapterHTML.utf16.count)) {
                     if let contentRange = Range(headingMatch.range(at: 3), in: chapterHTML) {
                         let plainText = String(chapterHTML[contentRange]).replacingOccurrences(of: "<[^>]+>", with: "", options: .regularExpression).trimmingCharacters(in: .whitespacesAndNewlines)
                         if !plainText.isEmpty {
@@ -330,13 +346,13 @@ final class EPUBSynthesizer: Sendable {
                 let fullHTML = """
                 <?xml version="1.0" encoding="utf-8"?>
                 <!DOCTYPE html>
-                <html xmlns="http://www.w3.org/1999/xhtml">
+                <html xmlns="http://www.w3.org/1999/xhtml" xmlns:epub="http://www.idpf.org/2007/ops">
                 <head>
                     <title>\(safeTitle)</title>
                     <meta charset="utf-8"/>
                     <style>
                         body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; line-height: 1.6; padding: 4%; color: #1c1c1e; background-color: #ffffff; }
-                        p { margin-bottom: 1.2em; text-indent: 0; text-align: justify; overflow-wrap: break-word; word-break: break-word; }
+                        p { margin-bottom: 1.2em; text-indent: 0; text-align: left; overflow-wrap: break-word; word-break: break-word; }
                         h1, h2, h3 { font-weight: 700; letter-spacing: -0.02em; color: #000000; margin-top: 1.8em; margin-bottom: 0.8em; }
                         h1.doc-title { font-size: 2.2em; text-align: center; margin-bottom: 1.5em; }
                         img { max-width: 100%; height: auto; display: block; margin: 30px auto; border-radius: 12px; }
@@ -353,6 +369,11 @@ final class EPUBSynthesizer: Sendable {
                             th, td { border-color: #38383a; }
                             .doc-caption { color: #8e8e93; }
                         }
+                        .book-contents { break-after: page; page-break-after: always; }
+                        .book-contents ol { list-style: none; padding-inline-start: 1.15em; }
+                        .book-contents > ol { padding-inline-start: 0; }
+                        .book-contents li { margin-block: 0.35em; break-inside: avoid; }
+                        .book-contents li:has(> ol) { break-inside: auto; }
                     </style>
                 </head>
                 <body>\(htmlBody)</body>
@@ -364,6 +385,7 @@ final class EPUBSynthesizer: Sendable {
                 manifestItems += "<item id=\"\(chapterId)\" href=\"\(fileName)\" media-type=\"application/xhtml+xml\"/>\n"
                 spineItems += "<itemref idref=\"\(chapterId)\"/>\n"
                 
+                if nativeOutline != nil { continue }
                 // 📖 建構章節目錄 (含內部標題)
                 navLinks += "<li><a href=\"\(fileName)\">\(safeTitle)</a>\n"
                 
@@ -373,21 +395,88 @@ final class EPUBSynthesizer: Sendable {
                     subEntries.removeFirst()
                 }
                 
-                if !subEntries.isEmpty {
+                if sourceTitles == nil && !subEntries.isEmpty {
                     navLinks += "<ol>\n"
                     navLinks += buildNavLinks(entries: subEntries, xhtmlFile: fileName)
                     navLinks += "</ol>\n"
                 }
                 navLinks += "</li>\n"
-                
+                navigationOrder += 1
                 ncxNavPoints += """
-                <navPoint id="navPoint-\(index + 1)" playOrder="\(index + 1)">
+                <navPoint id="navPoint-\(navigationOrder)" playOrder="\(navigationOrder)">
                     <navLabel><text>\(safeTitle)</text></navLabel>
                     <content src="\(fileName)"/>
-                </navPoint>\n
+                </navPoint>
+
                 """
+
+                // Divider headings can appear at the end of the preceding chapter file.
+                if sourceTitles != nil, index + 1 < rawChapters.count,
+                   let divider = tocEntries.last(where: {
+                       $0.text.range(of: #"^PART\s+(?:[IVXLCDM]+|[0-9]+)$"#,
+                                     options: [.regularExpression, .caseInsensitive]) != nil
+                   }) {
+                    if hasPart {
+                        navLinks += "</ol></li>\n"
+                        ncxNavPoints += "</navPoint>\n"
+                    }
+                    let label = sanitizeForXML(divider.text)
+                    let target = "\(fileName)#\(divider.id)"
+                    navigationOrder += 1
+                    navLinks += "<li><a href=\"\(target)\">\(label)</a><ol>\n"
+                    ncxNavPoints += """
+                    <navPoint id="navPoint-\(navigationOrder)" playOrder="\(navigationOrder)">
+                        <navLabel><text>\(label)</text></navLabel>
+                        <content src="\(target)"/>
+
+                    """
+                    hasPart = true
+                }
             }
-            
+            if hasPart {
+                navLinks += "</ol></li>\n"
+                ncxNavPoints += "</navPoint>\n"
+            }
+
+            if let nativeOutline, let sourceTitles {
+                var index = nativeOutline.firstIndex(where: { $0 >= 0 }) ?? nativeOutline.count
+                func renderLevel(_ depth: Int) -> (nav: String, ncx: String) {
+                    var nav = ""
+                    var ncx = ""
+                    while index < nativeOutline.count, nativeOutline[index] == depth {
+                        let label = sanitizeForXML(sourceTitles[index])
+                        let fileName = "chapter_\(index + 1).xhtml"
+                        index += 1
+                        navigationOrder += 1
+                        let playOrder = navigationOrder
+                        let children = renderLevel(depth + 1)
+                        nav += "<li><a href=\"\(fileName)\">\(label)</a>"
+                        if !children.nav.isEmpty { nav += "<ol>\(children.nav)</ol>" }
+                        nav += "</li>\n"
+                        ncx += """
+                        <navPoint id="navPoint-\(playOrder)" playOrder="\(playOrder)">
+                            <navLabel><text>\(label)</text></navLabel>
+                            <content src="\(fileName)"/>
+                            \(children.ncx)
+                        </navPoint>
+
+                        """
+                    }
+                    return (nav, ncx)
+                }
+                (navLinks, ncxNavPoints) = renderLevel(0)
+            }
+            let tocDepth = nativeOutline.map { ($0.max() ?? 0) + 1 } ?? (hasPart ? 2 : 1)
+
+            // Reuse the electronic navigation links for the in-book contents.
+            let contents = "<nav class=\"book-contents\" epub:type=\"toc\" aria-label=\"Contents\"><h2>Contents</h2><ol>\(navLinks)</ol></nav>"
+            for (index, entry) in chapterEntries.enumerated() {
+                guard let html = String(data: entry.data, encoding: .utf8),
+                      html.contains("<!-- PRINTED_CONTENTS -->") else { continue }
+                let updated = html.replacingOccurrences(of: "<!-- PRINTED_CONTENTS -->", with: contents)
+                chapterEntries[index] = EPUBArchiveEntry(path: entry.path, data: Data(updated.utf8))
+            }
+
             let navHTML = """
             <?xml version="1.0" encoding="utf-8"?>
             <html xmlns="http://www.w3.org/1999/xhtml" xmlns:epub="http://www.idpf.org/2007/ops">
@@ -401,7 +490,7 @@ final class EPUBSynthesizer: Sendable {
             <ncx xmlns="http://www.daisy.org/z3986/2005/ncx/" version="2005-1">
                 <head>
                     <meta name="dtb:uid" content="urn:uuid:\(bookUUID)"/>
-                    <meta name="dtb:depth" content="1"/>
+                    <meta name="dtb:depth" content="\(tocDepth)"/>
                     <meta name="dtb:totalPageCount" content="0"/>
                     <meta name="dtb:maxPageNumber" content="0"/>
                 </head>

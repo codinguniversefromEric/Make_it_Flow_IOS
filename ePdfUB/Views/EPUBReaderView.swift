@@ -4,19 +4,28 @@ import QuickLook
 // 簡易 EPUB 閱讀器
 struct EPUBReaderView: View {
     let file: LibraryItem
-    @Environment(\.dismiss) private var dismiss
-    
+
     var body: some View {
         Group {
-            if file.url.pathExtension.lowercased() == "epub" {
+            if QLPreviewController.canPreview(file.url as NSURL) {
                 QuickLookPreview(url: file.url)
+                    .id(file.id)
             } else {
-                QuickLookPreview(url: file.url)
+                ContentUnavailableView(
+                    "Preview Unavailable",
+                    systemImage: "book.closed",
+                    description: Text("Use Share to open this EPUB in a reading app.")
+                )
             }
         }
         .navigationTitle(file.title)
         .navigationBarTitleDisplayMode(.inline)
-        .background(Color(.systemBackground))
+        .toolbar {
+            ToolbarItem(placement: .primaryAction) {
+                ShareLink(item: file.url)
+            }
+        }
+        .background(Color(uiColor: .systemBackground))
     }
 }
 

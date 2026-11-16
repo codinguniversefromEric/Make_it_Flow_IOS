@@ -94,6 +94,21 @@ class BatchProcessor: ObservableObject {
             // 📖 These mutable variables are fully owned by the detached task to avoid data races
             var detectedTitle = initialTitle
             var fullHTML = ""
+            let pdfBookmarks = Self.sourceOutline(in: document)
+            let numberedChapters = pdfBookmarks.isEmpty ? Self.numberedChapterStarts(in: document) : [:]
+            let printedOutline = pdfBookmarks.isEmpty && numberedChapters.isEmpty
+                ? PDFPrintedOutline.read(document) : nil
+            let outline = printedOutline?.outline ?? pdfBookmarks
+            let chapterStarts = outline.isEmpty ? numberedChapters : outline.mapValues(\.title)
+            let contentsPages = printedOutline?.contentsPages ?? (
+                outline.isEmpty
+                    ? Self.printedContentsPages(in: document, chapterStarts: chapterStarts)
+                    : Self.linkedContentsPages(in: document, outline: outline)
+            )
+            let repeatedMargins = Self.repeatedMarginLines(in: document)
+            var chapterTitles = [initialTitle ?? "Front Matter"]
+            var outlineDepths = [-1]
+            var chapterNotes = ""
             
             // 🌐 全域文件樣式分析
             AppLogger.shared.info("開始進行全域樣式分析...")
@@ -119,6 +134,12 @@ class BatchProcessor: ObservableObject {
                     continue
                 }
                 
+                if contentsPages.contains(pageIndex) {
+                    if pageIndex == contentsPages.min() {
+                        fullHTML += "<!-- PRINTED_CONTENTS -->\n\n"
+                    }
+                    continue
+                }
                 let pageBounds = page.bounds(for: .cropBox)
                 
                 // 🎯 模型感知的渲染倍率：統一使用 2x
@@ -285,111 +306,107 @@ class BatchProcessor: ObservableObject {
                     }
                 }
                 
-                // 分離視覺區域 vs 文字區域
-                var visualRegions: [VisualRegion] = []
-                var textRegionRects: [CGRect] = []
-                
-                for obs in filteredObs {
-                    let label = obs.label
-                    let conf = obs.confidence
-                    let cRect = VNImageRectForNormalizedRect(obs.boundingBox, Int(scaledSize.width), Int(scaledSize.height))
-                    let dRect = CGRect(x: cRect.minX, y: scaledSize.height - cRect.maxY, width: cRect.width, height: cRect.height)
-                    
-                    if label == "Picture" || label == "Figure" || label == "Formula" || label == "Table" {
-                        visualRegions.append(VisualRegion(label: label, rect: dRect, confidence: conf))
-                    } else {
-                        textRegionRects.append(dRect)
-                    }
-                }
-                
-                print("📊 第 \(pageIndex + 1) 頁 YOLO: \(filteredObs.count) 區域 (\(visualRegions.count) 視覺)")
-                
+                let visualLabels: Set<String> = ["Picture", "Figure", "Formula", "Table"]
+                let visualIndices = filteredObs.indices.filter { visualLabels.contains(filteredObs[$0].label) }
+
                 // ═══════════════════════════════════════════
                 // STAGE 2: PDFKit 富文字萃取 → TextFragment
                 // ═══════════════════════════════════════════
                 
                 var textFragments: [TextFragment] = []
-                var tableFragments: [Int: [TextFragment]] = [:]
                 
-                if let selection = page.selection(for: pageBounds) {
-                    for line in selection.selectionsByLine() {
-                        guard let lineText = line.string, !lineText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { continue }
-                        
-                        let pRect = line.bounds(for: page)
-                        let displayRect = CGRect(
-                            x: pRect.minX * scale,
-                            y: (pageBounds.height - pRect.maxY) * scale,
-                            width: pRect.width * scale,
-                            height: pRect.height * scale
-                        )
-                        
-                        // 📝 嘗試從 attributedString 擷取字體資訊
-                        var fontSize: CGFloat = 12.0
-                        var fontName: String? = nil
-                        var isBold = false
-                        var isItalic = false
-                        var colorHex = "#000000"
-                        
-                        if let attrStr = line.attributedString {
-                            attrStr.enumerateAttributes(in: NSRange(location: 0, length: attrStr.length)) { attrs, _, _ in
-                                if let font = attrs[.font] as? AppFont {
-                                    fontSize = font.pointSize
-                                    fontName = font.fontName
-                                    isBold = font.isAppFontBold
-                                    #if os(iOS)
-                                    isItalic = font.fontDescriptor.symbolicTraits.contains(.traitItalic)
-                                    #elseif os(macOS)
-                                    isItalic = font.fontDescriptor.symbolicTraits.contains(.italic)
-                                    #endif
-                                }
-                                if let color = attrs[.foregroundColor] as? AppColor {
-                                    colorHex = color.hexString
-                                }
-                            }
-                        }
-                        
-                        let fragment = TextFragment(
-                            text: lineText,
-                            bounds: displayRect,
-                            fontSize: fontSize * scale,
-                            fontName: fontName,
-                            isBold: isBold,
-                            isItalic: isItalic,
-                            colorHex: colorHex
-                        )
-                        
-                        // 🔍 排除落在視覺區域 (圖片/表格/公式) 內的文字行，但保留表格內的碎片用於結構重建
-                        var handledByVisualRegion = false
-                        let lineArea = displayRect.width * displayRect.height
-                        
-                        for (index, region) in visualRegions.enumerated() {
-                            let intersection = region.rect.intersection(displayRect)
-                            if !intersection.isNull {
-                                let intersectionArea = intersection.width * intersection.height
-                                let ratio = lineArea > 0 ? intersectionArea / lineArea : 0
-                                let expandedRegion = region.rect.insetBy(dx: -5, dy: -5)
-                                let lineMid = CGPoint(x: displayRect.midX, y: displayRect.midY)
-                                
-                                if region.label == "Table" {
-                                    // 表格：40% 重疊就排除，但保存碎片用於結構重建
-                                    if ratio > 0.4 || expandedRegion.contains(lineMid) {
-                                        tableFragments[index, default: []].append(fragment)
-                                        handledByVisualRegion = true
-                                        break
-                                    }
-                                } else if region.label == "Picture" || region.label == "Figure" || region.label == "Formula" {
-                                    // 圖片/公式：90% 重疊才排除，保守策略以保留 caption
-                                    if ratio > 0.90 {
-                                        handledByVisualRegion = true
-                                        break
+                for line in PDFTextLines.selections(in: page, bounds: pageBounds) {
+                    guard let lineText = line.string, !lineText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { continue }
+
+                    let pRect = line.bounds(for: page)
+                    let displayRect = CGRect(
+                        x: pRect.minX * scale,
+                        y: (pageBounds.height - pRect.maxY) * scale,
+                        width: pRect.width * scale,
+                        height: pRect.height * scale
+                    )
+
+                    // 📝 嘗試從 attributedString 擷取字體資訊
+                    var fontSize: CGFloat = 12.0
+                    var fontName: String? = nil
+                    var isBold = false
+                    var isItalic = false
+                    var colorHex = "#000000"
+                    var footnoteMarkers: [NSRange] = []
+                    let recoveredText = NSMutableString(string: lineText)
+
+                    if let attrStr = line.attributedString, attrStr.length > 0 {
+                        let source = attrStr.string as NSString
+                        var markerRuns: [(range: NSRange, size: CGFloat)] = []
+                        var lineFontSize: CGFloat = 0
+                        var longestTextRun = 0
+                        attrStr.enumerateAttributes(in: NSRange(location: 0, length: attrStr.length)) { attrs, range, _ in
+                            if let font = attrs[.font] as? AppFont {
+                                let runText = source.substring(with: range)
+                                if runText.range(of: #"^(?:[0-9]{1,3}|[*†‡])$"#, options: .regularExpression) != nil {
+                                    markerRuns.append((range, font.pointSize))
+                                } else {
+                                    let letters = runText.filter(\.isLetter).count
+                                    if letters > longestTextRun {
+                                        longestTextRun = letters
+                                        lineFontSize = font.pointSize
+                                        fontSize = font.pointSize
+                                        fontName = font.fontName
+                                        isBold = font.isAppFontBold
+                                        #if os(iOS)
+                                        isItalic = font.fontDescriptor.symbolicTraits.contains(.traitItalic)
+                                        #elseif os(macOS)
+                                        isItalic = font.fontDescriptor.symbolicTraits.contains(.italic)
+                                        #endif
                                     }
                                 }
                             }
+                            if let color = attrs[.foregroundColor] as? AppColor {
+                                let runText = source.substring(with: range)
+                                let hex = color.hexString
+                                let rgb = UInt32(hex.dropFirst(), radix: 16) ?? 0
+                                let red = Int((rgb >> 16) & 255)
+                                let green = Int((rgb >> 8) & 255)
+                                let blue = Int(rgb & 255)
+                                // Some embedded fonts expose the red bullet glyph as a lowercase l.
+                                if attrStr.string == lineText, runText == "l",
+                                   red - green > 60, red - blue > 60 {
+                                    recoveredText.replaceCharacters(in: range, with: "•")
+                                } else if runText.contains(where: \.isLetter) {
+                                    colorHex = hex
+                                }
+                            }
                         }
-                        if handledByVisualRegion { continue }
-                        
-                        textFragments.append(fragment)
+                        if longestTextRun == 0, let font = attrStr.attribute(.font, at: 0, effectiveRange: nil) as? AppFont {
+                            fontSize = font.pointSize
+                        }
+                        if attrStr.string == lineText {
+                            footnoteMarkers = markerRuns.filter {
+                                $0.range.location > 0 && $0.size <= lineFontSize * 0.80
+                            }.map(\.range)
+                            if footnoteMarkers.isEmpty {
+                                // PDFKit can flatten a superscript into the surrounding run.
+                                // The matcher still requires a unique, smaller note on this page.
+                                let pattern = #"(?<=[.!?])([0-9]{1,3})(?=\s|$)"#
+                                let regex = try! NSRegularExpression(pattern: pattern)
+                                footnoteMarkers = regex.matches(in: lineText, range: NSRange(location: 0, length: source.length))
+                                    .map { $0.range(at: 1) }
+                            }
+                        }
                     }
+
+                    let fragment = TextFragment(
+                        text: recoveredText.replacingOccurrences(of: "\u{0007}", with: ""),
+                        bounds: displayRect,
+                        fontSize: fontSize * scale,
+                        fontName: fontName,
+                        isBold: isBold,
+                        isItalic: isItalic,
+                        colorHex: colorHex,
+                        footnoteMarkers: lineText.contains("\u{0007}") ? [] : footnoteMarkers
+                    )
+
+                    textFragments.append(fragment)
                 }
                 // ═══════════════════════════════════════════
                 // STAGE 2.1: 去除重疊的重複碎片 (Faux Bold / Shadow 處理)
@@ -423,8 +440,52 @@ class BatchProcessor: ObservableObject {
                         dedupedFragments.append(frag)
                     }
                 }
-                textFragments = dedupedFragments
+                textFragments = PDFTextLines.attachListMarkers(dedupedFragments)
                 
+                // Extract visuals after retaining the full set of PDF lines for edge checks.
+                // Text suppression and layout assignment use the same rectangle as the saved image.
+                var visualRegions: [VisualRegion] = []
+                var visualFragments: [TextFragment] = []
+                for (imageIndex, observationIndex) in visualIndices.enumerated() {
+                    let observation = filteredObs[observationIndex]
+                    let visionRect = VNImageRectForNormalizedRect(
+                        observation.boundingBox, Int(scaledSize.width), Int(scaledSize.height)
+                    )
+                    let original = CGRect(x: visionRect.minX, y: scaledSize.height - visionRect.maxY,
+                                          width: visionRect.width, height: visionRect.height)
+                    let crop = observation.label == "Formula"
+                        ? VisualCropBoundary.expandedFormulaRect(original, lines: textFragments, pageSize: scaledSize)
+                        : VisualCropBoundary.trimmedRect(original, label: observation.label, lines: textFragments)
+                    let fileName = "\(observation.label.lowercased())_p\(pageIndex + 1)_\(imageIndex)"
+                    guard PDFImageExtractor.cropAndSaveImage(from: validRawImage, cropRect: crop,
+                                                             imageName: fileName, assetsURL: assetsDir) != nil else {
+                        filteredObs[observationIndex] = LayoutBlock(
+                            boundingBox: observation.boundingBox, label: "Text", confidence: observation.confidence
+                        )
+                        continue
+                    }
+
+                    if crop != original {
+                        let box = CGRect(x: crop.minX / scaledSize.width,
+                                         y: 1 - crop.maxY / scaledSize.height,
+                                         width: crop.width / scaledSize.width,
+                                         height: crop.height / scaledSize.height)
+                        filteredObs[observationIndex] = LayoutBlock(
+                            boundingBox: box, label: observation.label, confidence: observation.confidence
+                        )
+                    }
+                    visualRegions.append(VisualRegion(label: observation.label, rect: crop,
+                                                      confidence: observation.confidence))
+                    let image = "<img src=\"assets/\(fileName).jpg\" alt=\"figure\" />"
+                    let html = observation.label == "Formula" ? "<div class=\"doc-formula\">\(image)</div>" : image
+                    visualFragments.append(TextFragment(text: html, bounds: crop, fontSize: 12 * scale,
+                                                        fontName: nil, isBold: false, isItalic: false,
+                                                        colorHex: "#000000"))
+                }
+                textFragments.removeAll { line in
+                    visualRegions.contains { VisualCropBoundary.containsImageText(line.bounds, in: $0) }
+                }
+
                 // ═══════════════════════════════════════════
                 // STAGE 2.5: 掃描檔無文字層 Fallback (Scanned PDF)
                 // ═══════════════════════════════════════════
@@ -482,37 +543,8 @@ class BatchProcessor: ObservableObject {
                     }
                 }
                 
-                // OCR Fallback and extra logics removed for YOLO 99% accuracy transition
-                
-                // ═══════════════════════════════════════════
-                // STAGE 2.6: 視覺區塊實體擷取 (Formula, Picture, Figure)
-                // ═══════════════════════════════════════════
-                
-                for (index, region) in visualRegions.enumerated() {
-                    if region.label == "Formula" || region.label == "Picture" || region.label == "Figure" || region.label == "Table" {
-                        AppLogger.shared.info("🖼️ 擷取視覺區塊 (\(region.label))...")
-                        let fileName = "\(region.label.lowercased())_p\(pageIndex + 1)_\(index)"
-                        
-                        if let _ = PDFImageExtractor.cropAndSaveImage(from: validRawImage, cropRect: region.rect, imageName: fileName, assetsURL: assetsDir) {
-                            let prefix = region.label == "Table" ? "表格" : "圖表/圖片"
-                            let imgHTML = "<img src=\"assets/\(fileName).jpg\" alt=\"\(prefix)：\(fileName)\" />"
-                            let mdText = region.label == "Formula" ? "<div class=\"doc-formula\">\(imgHTML)</div>" : imgHTML
-                            
-                            let fragment = TextFragment(
-                                text: mdText,
-                                bounds: region.rect,
-                                fontSize: 12.0 * scale,
-                                fontName: nil,
-                                isBold: false,
-                                isItalic: false,
-                                colorHex: "#000000"
-                            )
-                            textFragments.append(fragment)
-                        }
-                    }
-                }
+                textFragments.append(contentsOf: visualFragments)
 
-                
                 // ═══════════════════════════════════════════
                 // STAGE 3: 佈局分析引擎 → 基於 YOLO 區塊的幾何重組
                 // ═══════════════════════════════════════════
@@ -526,10 +558,12 @@ class BatchProcessor: ObservableObject {
                     pageHeight: scaledSize.height
                 )
                 
+                paragraphs = LayoutEngine.separateTrailingNotes(in: paragraphs, pageHeight: scaledSize.height)
+                let footnotes = LayoutEngine.matchFootnotes(in: &paragraphs, pageIndex: pageIndex, pageHeight: scaledSize.height)
                 // Semantic classification is now handled directly via LayoutEngine mapping from D4LA labels
                 
                 // 🛡️ 啟發式標題校正 (Heading Leveling & Promotion)
-                for i in 0..<paragraphs.count {
+                for i in paragraphs.indices where paragraphs[i].role != .footnote && footnotes.references[i] == nil {
                     let text = paragraphs[i].unifiedText.trimmingCharacters(in: .whitespacesAndNewlines)
                     
                     // 主標題 (H1)：第X講、第X章、Part X、壹、
@@ -587,11 +621,17 @@ class BatchProcessor: ObservableObject {
                 // ═══════════════════════════════════════════
                 
                 var pageMD = ""
+                var pageNotes = ""
                 var rawTextForLLM = ""
                 
                 // 文字段落 → Markdown
-                for block in paragraphs {
-                    if LayoutEngine.shouldDrop(block: block, pageHeight: scaledSize.height, baseFontSize: styleRegistry.bodyFontSize) { continue }
+                for (index, block) in paragraphs.enumerated() {
+                    let isLinkedNote = footnotes.notes[index] != nil || footnotes.references[index] != nil
+                    let isRepeatedMargin = !block.fragments.isEmpty && block.fragments.allSatisfy {
+                        guard let key = Self.marginLineKey(text: $0.text, bounds: $0.bounds, pageHeight: scaledSize.height) else { return false }
+                        return repeatedMargins.contains(key)
+                    }
+                    if !isLinkedNote && (isRepeatedMargin || LayoutEngine.shouldDrop(block: block, pageHeight: scaledSize.height)) { continue }
                     
                     // 📖 擷取文件標題
                     if block.role == .title {
@@ -604,8 +644,15 @@ class BatchProcessor: ObservableObject {
                         }
                     }
                     
-                    let htmlStr = LayoutEngine.toHTML(block: block, baseFontSize: styleRegistry.bodyFontSize)
-                    if !htmlStr.isEmpty {
+                    let htmlStr = LayoutEngine.toHTML(
+                        block: block,
+                        baseFontSize: styleRegistry.bodyFontSize,
+                        footnoteID: footnotes.notes[index],
+                        footnoteLinks: footnotes.references[index] ?? [:]
+                    )
+                    if footnotes.notes[index] != nil {
+                        pageNotes += htmlStr
+                    } else {
                         rawTextForLLM += htmlStr
                     }
                 }
@@ -615,8 +662,18 @@ class BatchProcessor: ObservableObject {
                 }
                 
                 // 📖 智慧分章
-                if pageIndex > 0 {
-                    if let firstBlock = paragraphs.first(where: { !LayoutEngine.shouldDrop(block: $0, pageHeight: scaledSize.height, baseFontSize: styleRegistry.bodyFontSize) }),
+                if let chapterTitle = chapterStarts[pageIndex] {
+                    if pageIndex == 0 {
+                        chapterTitles[0] = chapterTitle
+                        outlineDepths[0] = outline[pageIndex]?.depth ?? -1
+                    } else {
+                        fullHTML += chapterNotes + "<!-- CHAPTER_SPLIT -->\n\n"
+                        chapterNotes = ""
+                        chapterTitles.append(chapterTitle)
+                        outlineDepths.append(outline[pageIndex]?.depth ?? -1)
+                    }
+                } else if chapterStarts.isEmpty && pageIndex > 0 {
+                    if let firstBlock = paragraphs.first(where: { !LayoutEngine.shouldDrop(block: $0, pageHeight: scaledSize.height) }),
                        firstBlock.role == .title || firstBlock.role == .heading {
                         
                         let text = firstBlock.unifiedText.lowercased()
@@ -625,12 +682,14 @@ class BatchProcessor: ObservableObject {
                         // 根據嚴格的語意角色來判定是否為章節起點 (避免視覺 isH1 誤導)
                         // 只有當它真正是 .title，或者明確符合章節的正則表達式時，才進行切割
                         if firstBlock.role == .title || isChapterRegex {
-                            fullHTML += "<!-- CHAPTER_SPLIT -->\n\n"
+                            fullHTML += chapterNotes + "<!-- CHAPTER_SPLIT -->\n\n"
+                            chapterNotes = ""
                         }
                     }
                 }
                 
                 fullHTML += pageMD + "\n\n"
+                chapterNotes += pageNotes
                 
                 // 🧹 即時釋放記憶體
                 rawImage = nil
@@ -646,6 +705,7 @@ class BatchProcessor: ObservableObject {
             
             // 執行跨頁段落無縫續接 (縫合被換頁切斷的句子)
             AppLogger.shared.info("開始執行跨頁段落縫合...")
+            fullHTML += chapterNotes
             fullHTML = LayoutEngine.stitchCrossPageParagraphs(html: fullHTML)
             
             // 📖 決定最終書名：PDF 元資料 → 第一個 .title 區塊 → 預設名稱
@@ -665,9 +725,15 @@ class BatchProcessor: ObservableObject {
                 
                 let finalEPUB: URL?
                 // 🧠 智慧路由：根據頁數決定合成通道
-                if document.pageCount > 50 {
+                if !chapterStarts.isEmpty || document.pageCount > 50 {
                     AppLogger.shared.info("📚 偵測到長篇文件 (\(document.pageCount) 頁)，啟動書籍引擎...")
-                    finalEPUB = EPUBSynthesizer.createBookEPUB(title: bookTitle, fullHTML: fullHTML, assetsURL: assetsDir)
+                    finalEPUB = EPUBSynthesizer.createBookEPUB(
+                        title: bookTitle,
+                        fullHTML: fullHTML,
+                        assetsURL: assetsDir,
+                        chapterTitles: chapterStarts.isEmpty ? nil : chapterTitles,
+                        outlineDepths: outline.isEmpty ? nil : outlineDepths
+                    )
                 } else {
                     AppLogger.shared.info("📄 短篇論文模式 (\(document.pageCount) 頁)，啟動標準單頁引擎...")
                     finalEPUB = EPUBSynthesizer.createEPUB(title: bookTitle, html: fullHTML, assetsURL: assetsDir)
@@ -704,6 +770,145 @@ class BatchProcessor: ObservableObject {
     }
     
 
+
+    private nonisolated static func marginLineKey(text: String, bounds: CGRect, pageHeight: CGFloat) -> String? {
+        guard pageHeight > 0 else { return nil }
+        let atTop = bounds.maxY <= pageHeight * 0.10
+        let atBottom = bounds.minY >= pageHeight * 0.90
+        guard atTop || atBottom else { return nil }
+        let normalized = text.split(whereSeparator: \.isWhitespace).joined(separator: " ")
+        guard normalized.count >= 4, normalized.count <= 100,
+              normalized.contains(where: \.isLetter) else { return nil }
+        let position = Int((bounds.midY / pageHeight * 100).rounded())
+        return "\(position)|\(normalized)"
+    }
+
+    private nonisolated static func repeatedMarginLines(in document: PDFDocument) -> Set<String> {
+        var occurrences: [String: Set<Int>] = [:]
+        for pageIndex in 0..<document.pageCount {
+            guard let page = document.page(at: pageIndex) else { continue }
+            let pageBounds = page.bounds(for: .cropBox)
+            for line in page.selection(for: pageBounds)?.selectionsByLine() ?? [] {
+                guard let text = line.string else { continue }
+                let source = line.bounds(for: page)
+                // Match the display coordinates used by the extraction pipeline.
+                let bounds = CGRect(x: source.minX, y: pageBounds.height - source.maxY,
+                                    width: source.width, height: source.height)
+                if let key = marginLineKey(text: text, bounds: bounds, pageHeight: pageBounds.height) {
+                    occurrences[key, default: []].insert(pageIndex)
+                }
+            }
+        }
+        return Set(occurrences.filter { $0.value.count >= 3 }.map(\.key))
+    }
+
+    private nonisolated static func sourceOutline(in document: PDFDocument) -> [Int: (title: String, depth: Int)] {
+        guard let root = document.outlineRoot else { return [:] }
+        var entries: [(page: Int, title: String, depth: Int)] = []
+
+        func visit(_ parent: PDFOutline, depth: Int) -> Bool {
+            for index in 0..<parent.numberOfChildren {
+                guard let entry = parent.child(at: index),
+                      let destination = entry.destination ?? (entry.action as? PDFActionGoTo)?.destination,
+                      let page = destination.page,
+                      let title = entry.label?.trimmingCharacters(in: .whitespacesAndNewlines),
+                      !title.isEmpty else { return false }
+                let pageIndex = document.index(for: page)
+                // Page-based chapter splitting requires a unique, forward destination per entry.
+                guard pageIndex >= 0, (pageIndex < document.pageCount),
+                      pageIndex > (entries.last?.page ?? -1) else { return false }
+                entries.append((pageIndex, title, depth))
+                guard visit(entry, depth: depth + 1) else { return false }
+            }
+            return true
+        }
+
+        guard visit(root, depth: 0), entries.count >= 3 else { return [:] }
+        return Dictionary(uniqueKeysWithValues: entries.map { ($0.page, ($0.title, $0.depth)) })
+    }
+
+    private nonisolated static func linkedContentsPages(
+        in document: PDFDocument, outline: [Int: (title: String, depth: Int)]
+    ) -> Set<Int> {
+        let destinations = Set(outline.keys)
+        return Set((0..<min(document.pageCount, 20)).filter { index in
+            guard !destinations.contains(index), let page = document.page(at: index),
+                  let heading = page.string?.split(whereSeparator: \.isNewline).first,
+                  ["table of contents", "contents", "目錄"].contains(
+                    heading.trimmingCharacters(in: .whitespaces).lowercased()
+                  ) else { return false }
+            let linkedPages = Set(page.annotations.compactMap { annotation -> Int? in
+                let destination = annotation.destination ?? (annotation.action as? PDFActionGoTo)?.destination
+                return destination?.page.map { document.index(for: $0) }
+            })
+            return linkedPages.intersection(destinations).count >= 3
+        })
+    }
+
+    private nonisolated static func printedContentsPages(
+        in document: PDFDocument, chapterStarts: [Int: String]
+    ) -> Set<Int> {
+        guard let firstChapter = chapterStarts.keys.min(), chapterStarts.count >= 3 else { return [] }
+        func normalized(_ text: String) -> String {
+            text.lowercased().filter { $0.isLetter || $0.isNumber }
+        }
+        let entries = chapterStarts.values.compactMap { title -> String? in
+            let fields = title.split(separator: ":", maxSplits: 1)
+            guard fields.count == 2,
+                  let number = fields[0].split(separator: " ").last else { return nil }
+            return String(number) + normalized(String(fields[1]))
+        }
+        var result: Set<Int> = []
+        for index in 0..<firstChapter {
+            guard let text = document.page(at: index)?.string, text.count <= 3000 else { continue }
+            let key = normalized(text)
+            // A contents page has several numbered chapter titles followed by printed folios.
+            let matches = entries.filter { entry in
+                guard let range = key.range(of: entry), range.upperBound < key.endIndex else { return false }
+                return key[range.upperBound].isNumber
+            }
+            if matches.count >= 3 { result.insert(index) }
+        }
+        return result
+    }
+
+    /// Recognize a complete sequence of chapter-opening labels before trusting page breaks.
+    private nonisolated static func numberedChapterStarts(in document: PDFDocument) -> [Int: String] {
+        guard document.pageCount > 1 else { return [:] }
+        let marker = try! NSRegularExpression(
+            pattern: #"^C\h*H\h*A\h*P\h*T\h*E\h*R\h+([0-9](?:\h*[0-9]){0,2})$"#,
+            options: .caseInsensitive
+        )
+        var starts: [Int: String] = [:]
+
+        for pageIndex in 0..<document.pageCount {
+            if Task.isCancelled { return [:] }
+            guard let pageText = document.page(at: pageIndex)?.string else { continue }
+            let lines = pageText.split(whereSeparator: \.isNewline)
+                .map { $0.trimmingCharacters(in: .whitespaces) }
+                .filter { !$0.isEmpty }
+            guard let first = lines.first,
+                  let match = marker.firstMatch(in: first, range: NSRange(first.startIndex..., in: first)),
+                  let numberRange = Range(match.range(at: 1), in: first),
+                  let number = Int(first[numberRange].filter(\.isNumber)) else { continue }
+
+            guard number == starts.count + 1 else { return [:] }
+
+            // Publisher chapter openers can spread the title over several uppercase lines.
+            var title = ""
+            for line in lines.dropFirst().prefix(6) {
+                guard line.contains(where: \.isUppercase),
+                      !line.contains(where: \.isLowercase) else { break }
+                if !title.isEmpty && !title.hasSuffix("-") && !title.hasSuffix("—") {
+                    title += " "
+                }
+                title += line
+            }
+            starts[pageIndex] = title.isEmpty ? "Chapter \(number)" : "Chapter \(number): \(title)"
+        }
+
+        return starts.count >= 2 ? starts : [:]
+    }
 
     // MARK: - 圖片裁切工具
     

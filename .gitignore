@@ -12,5 +12,9 @@ ePdfUB/Config.xcconfig
 # Build directories
 .build/
 DerivedData/
-*.xcodeproj/xcuserdata/
 *.xcodeproj/project.xcworkspace/
+
+# Local system and Xcode user metadata
+.DS_Store
+xcuserdata/
+*.xcuserstate

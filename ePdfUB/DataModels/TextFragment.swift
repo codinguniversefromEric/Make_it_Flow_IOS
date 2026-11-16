@@ -19,6 +19,7 @@ struct TextFragment: Sendable {
     let isBold: Bool
     let isItalic: Bool
     let colorHex: String
+    var footnoteMarkers: [NSRange] = []
 }
 
 // MARK: - Semantic Role

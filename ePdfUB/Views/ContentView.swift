@@ -1,7 +1,6 @@
 import SwiftUI
 import UniformTypeIdentifiers
 import PDFKit
-import QuickLook
 import StoreKit
 
 enum AnimationState {
@@ -14,11 +13,14 @@ enum AnimationState {
 struct ContentView: View {
     @StateObject private var vm = ContentViewModel()
     @ObservedObject private var settings = AppSettings.shared
+    @State private var compactColumn: NavigationSplitViewColumn = .sidebar
+    @State private var selectedBookID: LibraryItem.ID?
     @State private var isGridView = false
     @State private var documentName = ""
     @State private var fileToDelete: LibraryItem? = nil
     @State private var showBrutalistSuccess = false
     @State private var successFileURL: URL? = nil
+    @Environment(\.verticalSizeClass) private var verticalSizeClass
     @Environment(\.requestReview) private var requestReview
 
     @AppStorage("successfulConversionCount")
@@ -34,32 +36,59 @@ struct ContentView: View {
         return df
     }()
 
+    private var selectedBook: LibraryItem? {
+        vm.libraryStore.items.first { $0.id == selectedBookID }
+    }
+
+    private var isConverting: Bool { vm.animState != .idle }
+    private var isShortLayout: Bool { verticalSizeClass == .compact }
+
     var body: some View {
-        NavigationView {
-            ZStack {
-                Color(UIColor.systemBackground).ignoresSafeArea()
-
-                VStack(spacing: 0) {
-                    if vm.animState == .processing {
-                        processingView
-                    } else if showBrutalistSuccess {
-                        successView
-                    } else {
-                        libraryView
-                    }
-
+        NavigationSplitView(preferredCompactColumn: $compactColumn) {
+            VStack(spacing: 0) {
+                libraryView
 #if DEBUG
-                    if vm.animState != .processing {
-                        devToolsPanel
-                    }
+                if !isConverting {
+                    devToolsPanel
+                }
 #endif
+            }
+            .navigationBarTitleDisplayMode(.inline)
+        } detail: {
+            ZStack {
+                Color(uiColor: .systemBackground).ignoresSafeArea()
+
+                if vm.animState == .processing {
+                    processingView
+                } else if showBrutalistSuccess {
+                    successView
+                } else if let selectedBook {
+                    EPUBReaderView(file: selectedBook)
+                } else {
+                    ContentUnavailableView(
+                        "Select an EPUB",
+                        systemImage: "book",
+                        description: Text("Choose a book from your library to preview it.")
+                    )
                 }
             }
-            .navigationBarHidden(true)
         }
-        .navigationViewStyle(.stack)
+        .navigationSplitViewStyle(.balanced)
+        .overlay {
+            if let file = fileToDelete {
+                deleteDialog(file: file)
+            }
+        }
+        .onChange(of: vm.animState) { previous, current in
+            if current == .processing || (current == .idle && showBrutalistSuccess) {
+                compactColumn = .detail
+            } else if previous == .processing && current == .idle && selectedBook == nil {
+                compactColumn = .sidebar
+            }
+        }
         .sheet(isPresented: $vm.showFilePicker) {
             PDFDocumentPicker { url in
+                showBrutalistSuccess = false
                 documentName = url.deletingPathExtension().lastPathComponent
                 vm.handlePickedPDF(url: url)
             }
@@ -110,6 +139,7 @@ struct ContentView: View {
                         url.stopAccessingSecurityScopedResource()
                     }
 
+                    showBrutalistSuccess = false
                     vm.handlePickedPDF(url: tempURL)
                 } catch {
                     if isSecurityScoped {
@@ -148,6 +178,9 @@ struct ContentView: View {
                             .border(Color.primary, width: 2)
                     }
                     
+                    .accessibilityLabel("List view")
+                    .accessibilityAddTraits(isGridView ? [] : .isSelected)
+
                     Button(action: { isGridView = true }) {
                         Image(systemName: "square.grid.2x2")
                             .font(.system(size: 20))
@@ -156,10 +189,12 @@ struct ContentView: View {
                             .background(isGridView ? Color.primary : Color(UIColor.systemBackground))
                             .border(Color.primary, width: 2)
                     }
+                    .accessibilityLabel("Grid view")
+                    .accessibilityAddTraits(isGridView ? .isSelected : [])
                 }
             }
             .padding(.horizontal, 24)
-            .padding(.vertical, 24)
+            .padding(.vertical, isShortLayout ? 8 : 24)
             .padding(.bottom, 8)
             .background(
                 Rectangle()
@@ -213,17 +248,13 @@ struct ContentView: View {
                         .padding(.vertical, 4)
                         .border(Color.primary, width: 3)
                 }
-                .padding(24)
+                .padding(.horizontal, 24)
+                .padding(.vertical, isShortLayout ? 8 : 24)
+                .accessibilityLabel("Import PDF")
+                .disabled(isConverting)
             }
             .background(Color(UIColor.systemBackground))
         }
-        .overlay(
-            Group {
-                if let file = fileToDelete {
-                    deleteDialog(file: file)
-                }
-            }
-        )
     }
 
     // MARK: - List & Grid Items
@@ -261,12 +292,12 @@ struct ContentView: View {
             alignment: .bottom
         )
         .contentShape(Rectangle())
-        .onTapGesture {
-            shareOrOpen(file: file)
-        }
-        .onLongPressGesture {
-            fileToDelete = file
-        }
+        .modifier(BookSelection(
+            isSelected: selectedBookID == file.id,
+            onSelect: { selectBook(file) },
+            onDelete: { fileToDelete = file }
+        ))
+        .disabled(isConverting)
     }
 
     @ViewBuilder
@@ -315,29 +346,20 @@ struct ContentView: View {
                 .padding(.top, 8)
         }
         .contentShape(Rectangle())
-        .onTapGesture {
-            shareOrOpen(file: file)
-        }
-        .onLongPressGesture {
-            fileToDelete = file
-        }
+        .modifier(BookSelection(
+            isSelected: selectedBookID == file.id,
+            onSelect: { selectBook(file) },
+            onDelete: { fileToDelete = file }
+        ))
+        .disabled(isConverting)
     }
     
-    private func shareOrOpen(file: LibraryItem) {
-        let activityVC = UIActivityViewController(activityItems: [file.url], applicationActivities: nil)
-        if let windowScene = UIApplication.shared.connectedScenes.first(where: { $0.activationState == .foregroundActive }) as? UIWindowScene,
-           let rootVC = windowScene.windows.first?.rootViewController {
-            
-            if let popover = activityVC.popoverPresentationController {
-                popover.sourceView = rootVC.view
-                popover.sourceRect = CGRect(x: UIScreen.main.bounds.midX, y: UIScreen.main.bounds.midY, width: 0, height: 0)
-                popover.permittedArrowDirections = []
-            }
-            
-            rootVC.present(activityVC, animated: true)
-        }
+    private func selectBook(_ file: LibraryItem) {
+        showBrutalistSuccess = false
+        selectedBookID = file.id
+        compactColumn = .detail
     }
-    
+
     // MARK: - Delete Dialog
     @ViewBuilder
     private func deleteDialog(file: LibraryItem) -> some View {
@@ -363,6 +385,10 @@ struct ContentView: View {
                     }
                     Button(action: {
                         vm.libraryStore.deleteItem(file)
+                        if selectedBookID == file.id {
+                            selectedBookID = nil
+                            compactColumn = .sidebar
+                        }
                         fileToDelete = nil
                     }) {
                         Text("DELETE")
@@ -383,10 +409,10 @@ struct ContentView: View {
     // MARK: - Processing View
     @ViewBuilder
     private var processingView: some View {
-        VStack(spacing: 64) {
+        VStack(spacing: isShortLayout ? 16 : 40) {
             Spacer()
             
-            VStack(spacing: 64) {
+            VStack(spacing: isShortLayout ? 16 : 40) {
                 Text(documentName.isEmpty ? "document.pdf" : "\(documentName).pdf")
                     .font(.custom("Times New Roman", size: 24))
                     .fontWeight(.bold)
@@ -425,7 +451,7 @@ struct ContentView: View {
                     .border(Color.primary, width: 2)
             }
             .padding(24)
-            .padding(.bottom, 32)
+            .padding(.bottom, isShortLayout ? 0 : 24)
         }
         .background(Color(UIColor.systemBackground))
     }
@@ -433,7 +459,7 @@ struct ContentView: View {
     // MARK: - Success View
     @ViewBuilder
     private var successView: some View {
-        VStack(spacing: 64) {
+        VStack(spacing: isShortLayout ? 16 : 40) {
             Spacer()
             
             VStack(spacing: 24) {
@@ -464,19 +490,16 @@ struct ContentView: View {
             Spacer()
             
             VStack(spacing: 12) {
-                Button(action: {
-                    if let url = successFileURL {
-                        shareOrOpen(file: LibraryItem(id: UUID(), url: url, title: documentName, createdAt: Date(), diagnosticsSummary: ""))
-                    }
-                }) {
-                    VStack(spacing: 2) {
-                        Text("EXPORT EPUB")
-                            .font(.custom("Times New Roman", size: 12))
-                            .fontWeight(.bold)
-                            .tracking(2)
-                        Text("(SHARE TO APPLE BOOKS)")
-                            .font(.system(size: 8, weight: .bold, design: .monospaced))
-                    }
+                if let successFileURL {
+                    ShareLink(item: successFileURL) {
+                        VStack(spacing: 2) {
+                            Text("EXPORT EPUB")
+                                .font(.custom("Times New Roman", size: 12))
+                                .fontWeight(.bold)
+                                .tracking(2)
+                            Text("(SHARE TO APPLE BOOKS)")
+                                .font(.system(size: 8, weight: .bold, design: .monospaced))
+                        }
                         .fontWeight(.bold)
                         .tracking(2)
                         .foregroundColor(Color(UIColor.systemBackground))
@@ -484,11 +507,14 @@ struct ContentView: View {
                         .padding(.vertical, 16)
                         .background(Color.primary)
                         .border(Color.primary, width: 3)
+                    }
+                    .buttonStyle(.plain)
                 }
-                
+
                 Button(action: {
                     documentName = ""
                     showBrutalistSuccess = false
+                    compactColumn = .sidebar
                 }) {
                     Text("CONVERT ANOTHER")
                         .font(.custom("Times New Roman", size: 12))
@@ -502,7 +528,7 @@ struct ContentView: View {
                 }
             }
             .padding(24)
-            .padding(.bottom, 32)
+            .padding(.bottom, isShortLayout ? 0 : 24)
         }
         .background(Color(UIColor.systemBackground))
     }
@@ -563,6 +589,25 @@ struct ContentView: View {
         )
     }
 #endif
+}
+
+private struct BookSelection: ViewModifier {
+    let isSelected: Bool
+    let onSelect: () -> Void
+    let onDelete: () -> Void
+
+    func body(content: Content) -> some View {
+        Button(action: onSelect) {
+            content
+                .background(isSelected ? Color(uiColor: .systemGray5) : .clear)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityAddTraits(isSelected ? .isSelected : [])
+        .contextMenu {
+            Button("Delete", systemImage: "trash", role: .destructive, action: onDelete)
+        }
+    }
 }
 
 struct CheckboxToggleStyle: ToggleStyle {
