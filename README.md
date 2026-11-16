@@ -1,5 +1,9 @@
 # ePdfUB
 
+<p align="center">
+  <img src="assets/ePdfUB%20icon.png" alt="ePdfUB app icon" width="120">
+</p>
+
 Turn small-print PDFs into EPUBs you can read at your own font size. Conversion runs on your device.
 
 [![Download on the App Store](https://developer.apple.com/assets/elements/badges/download-on-the-app-store.svg)](https://apps.apple.com/tw/app/make-it-flow/id6780764422?l=en-GB)
