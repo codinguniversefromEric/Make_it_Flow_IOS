@@ -18,3 +18,11 @@ DerivedData/
 .DS_Store
 xcuserdata/
 *.xcuserstate
+
+# Patch backups and generated benchmark output
+*.orig
+*.rej
+__pycache__/
+*.pyc
+/evaluation/benchmark_report.json
+/evaluation/benchmark_results.txt
