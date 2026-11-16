@@ -1,0 +1,79 @@
+# ePdfUB Technical Guide
+
+[Back to ePdfUB](../README.md)
+
+## 🚀 Getting Started
+
+### Requirements
+* macOS 14.0+ / Xcode 15.0+ / iOS 17.0+
+
+### Running the iOS App
+1. Clone the repository: `git clone https://github.com/codinguniversefromEric/Make_it_Flow_IOS.git`
+2. Open `ePdfUB.xcodeproj` in Xcode.
+3. Select a simulator or physical device, and press `Cmd + R` to build and run. (YOLO models are built-in, no external downloads required)
+
+### Running the CLI
+Ideal for batch processing, automations, or CI pipelines.
+```bash
+cd ePdfUB_CLI
+swift run ePdfUB_CLI /path/to/input.pdf /path/to/output.epub [nano|small|medium]
+```
+
+```mermaid
+flowchart LR
+    A([Terminal Command]) --> B{"Args Parser"}
+    B -->|input.pdf| C["Load PDFKit"]
+    B -->|Model Selection| D["Load CoreML Weights"]
+
+    C --> E["Batch Processor"]
+    D -.->|nano / small / medium| E
+
+    E --> F["ePdfUB Core Engine"]
+    F --> G["Generate EPUB / TOC"]
+    G --> H[/"Save to output.epub"/]
+
+    style A fill:#f96,stroke:#333,stroke-width:2px
+    style H fill:#9f6,stroke:#333,stroke-width:2px
+    style F fill:#69f,stroke:#333,stroke-width:2px,color:#fff
+```
+
+## 🧠 Architecture Overview
+
+The system pipeline is designed for high-performance extraction of academic papers and heavily formatted books:
+
+```mermaid
+flowchart TD
+    A[/"Input PDF"/] --> B["PDFKit & VisionEngine"]
+
+    B -->|Rasterized Images| C["CoreML YOLO DLA model"]
+    B -->|Native Rich Text| D["Hybrid Corrector"]
+
+    C -->|14-Class Bounding Boxes| D
+
+    D --> E["Layout Sorting & Stitching"]
+    E --> F["EPUB Synthesizer"]
+
+    F --> G[("Publisher-Grade EPUB")]
+
+    style A fill:#f96,stroke:#333,stroke-width:2px
+    style G fill:#9f6,stroke:#333,stroke-width:2px
+    style C fill:#f9f,stroke:#333,stroke-width:2px
+    style F fill:#69f,stroke:#333,stroke-width:2px,color:#fff
+```
+
+1. **VisionEngine**: Executes YOLO to classify 14 types of layout regions (Title, Body, Table, Picture, Formula, etc.).
+2. **Hybrid Corrector**: Combines YOLO's skeletal bounding boxes with native coordinate data extracted by PDFKit to perform precise alignment and text assignment.
+3. **Layout Sorting**: Computes geometric topological sorting, Y-axis alignment, and handles cross-page sentence stitching.
+4. **EPUB Synthesizer**: Compiles the parsed fragments into a strict, publisher-grade EPUB ZIP archive with responsive CSS.
+
+## 📊 Models & Benchmarks
+
+The project comes pre-packaged with three lightweight CoreML models based on [hantian/yolo-doclaynet](https://huggingface.co/hantian/yolo-doclaynet/tree/main). All models execute 100% offline leveraging Apple's Neural Engine.
+
+| Model | Average Processing Time (per page) | Layout Similarity (Accuracy) | Edit Distance | Recommended Use Case |
+|-------|------------------------------------|-----------------------------|---------------|----------------------|
+| **YOLOv26 Nano** (Default) | **~0.05 seconds** | **0.730** | **0.399** | **Default**. Lowest error rate and highest speed. Highly recommended for all documents. |
+| **YOLOv26 Small** | **~0.06 seconds** | **0.721** | **0.407** | Good balance of speed and precision for standard devices. |
+| **YOLOv26 Medium** | **~0.07 seconds** | **0.728** | **0.403** | Alternative for complex, multi-column academic papers with dense tables and charts. |
+
+*Note: Benchmarks were measured on Apple Silicon (M-series) against the full Hugging Face `marker_benchmark` dataset (2,138 documents). The built-in Swift engine merges deep layout bounding boxes with native PDFKit data, generating accurate EPUB architectures orders of magnitude faster than Python-based alternatives. **ePdfUB trades ~10-15% raw text retention (by converting complex tables and scanned PDFs into high-fidelity images instead of relying on heavy OCR) in exchange for lightning-fast, 100% offline mobile processing and publisher-grade visual aesthetics.***
