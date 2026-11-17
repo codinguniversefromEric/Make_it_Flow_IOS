@@ -12,6 +12,7 @@ import Vision
 import CoreML
 import Combine
 import CoreText
+import NaturalLanguage
 #if os(iOS)
 import UIKit
 #endif
@@ -66,6 +67,9 @@ class BatchProcessor: ObservableObject {
         
         // 📖 從 PDF 元資料萃取文件標題
         let initialTitle: String? = {
+            if let firstPage = document.page(at: 0), PDFTextLines.usesLegacyVietnameseEncoding(firstPage) {
+                return fileName
+            }
             let pdfMetadataTitle = document.documentAttributes?[PDFDocumentAttribute.titleAttribute] as? String
             var title = pdfMetadataTitle
             if title?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ?? true {
@@ -94,6 +98,10 @@ class BatchProcessor: ObservableObject {
             // 📖 These mutable variables are fully owned by the detached task to avoid data races
             var detectedTitle = initialTitle
             var fullHTML = ""
+            var languageSample = ""
+            var ocrLanguageSample = ""
+            var previousContentPage: Int?
+            var chapterStartPage = 0
             let pdfBookmarks = Self.sourceOutline(in: document)
             let numberedChapters = pdfBookmarks.isEmpty ? Self.numberedChapterStarts(in: document) : [:]
             let printedOutline = pdfBookmarks.isEmpty && numberedChapters.isEmpty
@@ -242,8 +250,8 @@ class BatchProcessor: ObservableObject {
                             
                             // 允許稍微重疊到些微空白
                             if verticalGap > -0.05 && verticalGap < 0.08 && horizontalOverlap > 0 {
-                                // 如果下一個也是 Table，或者是被包夾的扁平 Text
-                                if nextObs.label == "Table" || (nextObs.label == "Text" && nextObs.boundingBox.height < 0.06) {
+                                // 相鄰表格可合併，旁邊的文字仍保留為可選取內文。
+                                if nextObs.label == "Table" {
                                     currentRect = currentRect.union(nextObs.boundingBox)
                                     j += 1
                                     continue
@@ -277,30 +285,13 @@ class BatchProcessor: ObservableObject {
                         if let selection = page.selection(for: pdfRect), let text = selection.string {
                             let textForMath = text.replacingOccurrences(of: "\n", with: " ")
                             
-                            let hasEquals = textForMath.contains("=")
-                            let hasMath = textForMath.contains("+") || textForMath.contains("*") || textForMath.contains("/") || textForMath.contains("-")
-                            let isURL = textForMath.lowercased().contains("http") || textForMath.lowercased().contains("www.")
-                            
-                            // 特徵：方程式編號如 (6) 結尾，或包含希臘字母
-                            let hasEqNumber = textForMath.range(of: "\\(\\d+\\)\\s*$", options: .regularExpression) != nil
-                            let hasGreek = textForMath.range(of: "[α-ωΑ-Ωκχ]", options: .regularExpression) != nil
-                            
-                            // 若是標題類，條件較寬
-                            if obs.label == "Section-header" || obs.label == "Title" {
-                                if hasEquals || ((hasEqNumber || hasGreek) && hasMath) {
-                                    filteredObs[i] = LayoutBlock(boundingBox: obs.boundingBox, label: "Formula", confidence: obs.confidence)
-                                    AppLogger.shared.info("📐 啟發式修正: 將 YOLO 標題轉為 Formula (\(textForMath.prefix(20))...)")
-                                    continue
-                                }
-                            }
-                            
-                            // 若是內文類，條件嚴格 (避免把普通段落變成圖片)
-                            if obs.label == "Text" {
-                                if (hasEquals || hasEqNumber || hasGreek) && hasMath && !isURL && textForMath.count < 150 {
-                                    filteredObs[i] = LayoutBlock(boundingBox: obs.boundingBox, label: "Formula", confidence: obs.confidence)
-                                    AppLogger.shared.info("📐 啟發式修正: 將 YOLO 內文轉為 Formula (\(textForMath.prefix(20))...)")
-                                    continue
-                                }
+                            // Require an equation-shaped relation and an explicit mathematical operator.
+                            let relation = #"[\p{L}\p{N}\)\]]\s*[=≈≠≤≥]\s*[\p{L}\p{N}\(√−-]"#
+                            let hasRelation = textForMath.range(of: relation, options: .regularExpression) != nil
+                            let hasOperator = textForMath.range(of: #"[+×÷∑∫√±−]"#, options: .regularExpression) != nil
+                            let hasProse = textForMath.range(of: #"\b[A-Za-z]{4,}\b\s+\b[A-Za-z]{4,}\b"#, options: .regularExpression) != nil
+                            if hasRelation && hasOperator && !hasProse && textForMath.count < 150 {
+                                filteredObs[i] = LayoutBlock(boundingBox: obs.boundingBox, label: "Formula", confidence: obs.confidence)
                             }
                         }
                     }
@@ -315,7 +306,9 @@ class BatchProcessor: ObservableObject {
                 
                 var textFragments: [TextFragment] = []
                 
-                for line in PDFTextLines.selections(in: page, bounds: pageBounds) {
+                let usesLegacyVietnamese = PDFTextLines.usesLegacyVietnameseEncoding(page)
+                let nativeSelections = usesLegacyVietnamese ? [] : PDFTextLines.selections(in: page, bounds: pageBounds)
+                for line in nativeSelections {
                     guard let lineText = line.string, !lineText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { continue }
 
                     let pRect = line.bounds(for: page)
@@ -456,13 +449,24 @@ class BatchProcessor: ObservableObject {
                     let crop = observation.label == "Formula"
                         ? VisualCropBoundary.expandedFormulaRect(original, lines: textFragments, pageSize: scaledSize)
                         : VisualCropBoundary.trimmedRect(original, label: observation.label, lines: textFragments)
-                    let fileName = "\(observation.label.lowercased())_p\(pageIndex + 1)_\(imageIndex)"
-                    guard PDFImageExtractor.cropAndSaveImage(from: validRawImage, cropRect: crop,
-                                                             imageName: fileName, assetsURL: assetsDir) != nil else {
-                        filteredObs[observationIndex] = LayoutBlock(
-                            boundingBox: observation.boundingBox, label: "Text", confidence: observation.confidence
-                        )
-                        continue
+                    let html: String
+                    if observation.label == "Table", page.rotation == 0, pageBounds.origin == .zero,
+                       let table = TableReconstructor.reconstruct(page: page, bounds: CGRect(
+                           x: crop.minX / scale, y: pageBounds.height - crop.maxY / scale,
+                           width: crop.width / scale, height: crop.height / scale
+                       )) {
+                        html = table
+                    } else {
+                        let fileName = "\(observation.label.lowercased())_p\(pageIndex + 1)_\(imageIndex)"
+                        guard PDFImageExtractor.cropAndSaveImage(from: validRawImage, cropRect: crop,
+                                                                 imageName: fileName, assetsURL: assetsDir) != nil else {
+                            filteredObs[observationIndex] = LayoutBlock(
+                                boundingBox: observation.boundingBox, label: "Text", confidence: observation.confidence
+                            )
+                            continue
+                        }
+                        let image = "<img src=\"assets/\(fileName).jpg\" alt=\"figure\" />"
+                        html = observation.label == "Formula" ? "<div class=\"doc-formula\">\(image)</div>" : image
                     }
 
                     if crop != original {
@@ -476,8 +480,6 @@ class BatchProcessor: ObservableObject {
                     }
                     visualRegions.append(VisualRegion(label: observation.label, rect: crop,
                                                       confidence: observation.confidence))
-                    let image = "<img src=\"assets/\(fileName).jpg\" alt=\"figure\" />"
-                    let html = observation.label == "Formula" ? "<div class=\"doc-formula\">\(image)</div>" : image
                     visualFragments.append(TextFragment(text: html, bounds: crop, fontSize: 12 * scale,
                                                         fontName: nil, isBold: false, isItalic: false,
                                                         colorHex: "#000000"))
@@ -489,60 +491,86 @@ class BatchProcessor: ObservableObject {
                 // ═══════════════════════════════════════════
                 // STAGE 2.5: 掃描檔無文字層 Fallback (Scanned PDF)
                 // ═══════════════════════════════════════════
-                let textBlocksCount = filteredObs.filter { $0.label == "Text" || $0.label == "Section-header" || $0.label == "Title" || $0.label == "List-item" }.count
-                if textFragments.isEmpty && textBlocksCount > 0 {
-                    AppLogger.shared.info("⚠️ 偵測到純影像掃描檔 (無文字層)，啟動 OCR fallback")
-                    
+                let textLabels: Set<String> = ["Text", "Section-header", "Title", "List-item", "Caption", "Footnote"]
+                let textRegions = filteredObs.filter { textLabels.contains($0.label) }.map { block in
+                    let rect = VNImageRectForNormalizedRect(block.boundingBox, Int(scaledSize.width), Int(scaledSize.height))
+                    return CGRect(x: rect.minX, y: scaledSize.height - rect.maxY, width: rect.width, height: rect.height)
+                }
+                let uncoveredRegions = textRegions.filter { region in
+                    !textFragments.contains { fragment in
+                        region.contains(CGPoint(x: fragment.bounds.midX, y: fragment.bounds.midY))
+                    }
+                }
+                let hasSparseTextLayer = textFragments.allSatisfy { $0.bounds.maxY <= scaledSize.height * 0.10 ||
+                        $0.bounds.minY >= scaledSize.height * 0.90 }
+                if !uncoveredRegions.isEmpty || hasSparseTextLayer {
                     let request = VNRecognizeTextRequest()
                     request.recognitionLevel = .accurate
-                    request.recognitionLanguages = ["zh-Hant", "zh-Hans", "en-US"]
+                    request.automaticallyDetectsLanguage = true
+                    if let languages = try? request.supportedRecognitionLanguages(), !languages.isEmpty {
+                        if usesLegacyVietnamese, languages.contains("vi-VT") {
+                            request.recognitionLanguages = ["vi-VT"]
+                        } else {
+                            request.recognitionLanguages = languages
+                        }
+                    }
                     request.usesLanguageCorrection = true
-                    
+                    var recognizedLines = 0
+                    var confidentText = ""
+
                     let handler = VNImageRequestHandler(cgImage: validCGImg, options: [:])
                     do {
                         try handler.perform([request])
-                        if let observations = request.results {
-                            for obs in observations {
-                                guard let text = obs.topCandidates(1).first?.string, !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { continue }
-                                
-                                let ocrRect = obs.boundingBox
-                                
-                                var isInsideTextBlock = false
-                                for yoloObs in filteredObs {
-                                    if yoloObs.label == "Text" || yoloObs.label == "Section-header" || yoloObs.label == "Title" || yoloObs.label == "List-item" {
-                                        let intersection = ocrRect.intersection(yoloObs.boundingBox)
-                                        if !intersection.isNull {
-                                            let ocrArea = ocrRect.width * ocrRect.height
-                                            if ocrArea > 0 && (intersection.width * intersection.height) / ocrArea > 0.3 {
-                                                isInsideTextBlock = true
-                                                break
-                                            }
-                                        }
-                                    }
-                                }
-                                
-                                if isInsideTextBlock {
-                                    let cRect = VNImageRectForNormalizedRect(ocrRect, Int(scaledSize.width), Int(scaledSize.height))
-                                    let displayRect = CGRect(x: cRect.minX, y: scaledSize.height - cRect.maxY, width: cRect.width, height: cRect.height)
-                                    
-                                    let fragment = TextFragment(
-                                        text: text,
-                                        bounds: displayRect,
-                                        fontSize: displayRect.height * 0.8,
-                                        fontName: nil,
-                                        isBold: false,
-                                        isItalic: false,
-                                        colorHex: "#000000"
-                                    )
-                                    textFragments.append(fragment)
-                                }
+                        let nativeLines = textFragments
+                        for observation in request.results ?? [] {
+                            guard let candidate = observation.topCandidates(1).first, candidate.confidence >= 0.65,
+                                  !candidate.string.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { continue }
+                            let text = candidate.string
+                            let rect = VNImageRectForNormalizedRect(observation.boundingBox, Int(scaledSize.width), Int(scaledSize.height))
+                            let bounds = CGRect(x: rect.minX, y: scaledSize.height - rect.maxY, width: rect.width, height: rect.height)
+                            let midpoint = CGPoint(x: bounds.midX, y: bounds.midY)
+                            guard hasSparseTextLayer || uncoveredRegions.contains(where: { $0.contains(midpoint) }),
+                                  !nativeLines.contains(where: { $0.bounds.contains(midpoint) || bounds.contains(CGPoint(x: $0.bounds.midX, y: $0.bounds.midY)) }),
+                                  !visualRegions.contains(where: { VisualCropBoundary.containsImageText(bounds, in: $0) }) else { continue }
+                            textFragments.append(TextFragment(
+                                text: text, bounds: bounds, fontSize: bounds.height * 0.8,
+                                fontName: nil, isBold: false, isItalic: false, colorHex: "#000000"
+                            ))
+                            recognizedLines += 1
+                            if candidate.confidence >= 0.85, confidentText.count < 4_000 {
+                                confidentText += String(text.prefix(4_000 - confidentText.count)) + "\n"
                             }
                         }
                     } catch {
                         AppLogger.shared.error("OCR failed: \(error)")
                     }
+                    if recognizedLines >= 2, ocrLanguageSample.count < 4_000 {
+                        ocrLanguageSample += String(confidentText.prefix(4_000 - ocrLanguageSample.count))
+                    }
+                    if hasSparseTextLayer, recognizedLines < 2,
+                       let image = validRawImage.appJPEGData(compressionQuality: 0.85) {
+                        let filename = "page_\(pageIndex + 1).jpg"
+                        do {
+                            try image.write(to: assetsDir.appendingPathComponent(filename), options: .atomic)
+                            let bounds = CGRect(origin: .zero, size: scaledSize)
+                            let fragment = TextFragment(
+                                text: "<img src=\"assets/\(filename)\" alt=\"PDF page \(pageIndex + 1)\" />",
+                                bounds: bounds, fontSize: 12 * scale,
+                                fontName: nil, isBold: false, isItalic: false, colorHex: "#000000"
+                            )
+                            let fullPage = LayoutBlock(
+                                boundingBox: CGRect(x: 0, y: 0, width: 1, height: 1),
+                                label: "Picture", confidence: 1
+                            )
+                            textFragments = []
+                            visualFragments = [fragment]
+                            filteredObs = [fullPage]
+                        } catch {
+                            AppLogger.shared.error("Could not retain scanned page \(pageIndex + 1): \(error)")
+                        }
+                    }
                 }
-                
+
                 textFragments.append(contentsOf: visualFragments)
 
                 // ═══════════════════════════════════════════
@@ -567,16 +595,10 @@ class BatchProcessor: ObservableObject {
                     let text = paragraphs[i].unifiedText.trimmingCharacters(in: .whitespacesAndNewlines)
                     
                     // 主標題 (H1)：第X講、第X章、Part X、壹、
-                    let isMainChapter = text.range(of: "^第[一二三四五六七八九十百千萬萬0-9\\s]+[章部节讲篇]|^chapter\\s+\\d+|^part\\s+\\d+|^[壹貳參肆伍陸柒捌玖拾]+\\s*[、\\.]", options: [.regularExpression, .caseInsensitive]) != nil && text.count < 60
+                    let isMainChapter = text.range(of: "^第[一二三四五六七八九十百千萬萬0-9\\s]+[章部節节講讲篇卷回]|^chapter\\s+\\d+|^part\\s+\\d+|^[壹貳參肆伍陸柒捌玖拾]+\\s*[、\\.]", options: [.regularExpression, .caseInsensitive]) != nil && text.count < 60
                     
-                    // 次標題 (H2)：一 、 一、 1.1、 1. 
-                    let isSubHeading = text.range(of: "^[一二三四五六七八九十]+\\s*[、\\.\\s]|^[0-9]+\\.\\d+|^[0-9]+\\s*[、\\.]", options: [.regularExpression, .caseInsensitive]) != nil && text.count < 60
-                    
-                    // 強制語意階層覆蓋 (升級與校正)
                     if isMainChapter {
                         paragraphs[i].role = .title
-                    } else if isSubHeading {
-                        paragraphs[i].role = .heading
                     }
                 }
                 
@@ -587,16 +609,12 @@ class BatchProcessor: ObservableObject {
                         let text = paragraphs[i].unifiedText.trimmingCharacters(in: .whitespacesAndNewlines)
                         
                         let isTooLong = text.count > 100
-                        let endsWithPunctuation = text.range(of: "[.!?。！？,，;；]$", options: .regularExpression) != nil && text.count > 15
-                        let sentenceCount = text.components(separatedBy: ".").count - 1 + text.components(separatedBy: "。").count - 1
-                        let isMultiSentence = sentenceCount >= 2
+                        let hasSentenceBreak = text.range(of: #"(?:[。！？]|[.!?]\s+)\s*\p{L}{2}"#, options: .regularExpression) != nil
                         let isReferencePattern = text.range(of: "^\\[\\d+\\]", options: .regularExpression) != nil
                         let isURL = text.lowercased().contains("http") || text.lowercased().contains("www.")
-                        let hasPipes = text.contains("｜") || text.contains("|")
-                        
-                        if isTooLong || endsWithPunctuation || isMultiSentence || isReferencePattern || isURL || hasPipes {
+                        if isTooLong || hasSentenceBreak || isReferencePattern || isURL {
                             // 例外保留真正的 Chapter 或報告標題
-                            let isMainChapter = text.range(of: "^第[一二三四五六七八九十百千萬萬0-9\\s]+[章部节讲篇]|^chapter\\s+\\d+|^part\\s+\\d+|^[壹貳參肆伍陸柒捌玖拾]+\\s*[、\\.]", options: [.regularExpression, .caseInsensitive]) != nil && text.count < 60
+                            let isMainChapter = text.range(of: "^第[一二三四五六七八九十百千萬萬0-9\\s]+[章部節节講讲篇卷回]|^chapter\\s+\\d+|^part\\s+\\d+|^[壹貳參肆伍陸柒捌玖拾]+\\s*[、\\.]", options: [.regularExpression, .caseInsensitive]) != nil && text.count < 60
                             let isSubHeading = text.range(of: "^[一二三四五六七八九十]+\\s*[、\\.\\s]|^[0-9]+\\.\\d+|^[0-9]+\\s*[、\\.]", options: [.regularExpression, .caseInsensitive]) != nil && text.count < 60
                             
                             if !isMainChapter && !isSubHeading {
@@ -644,6 +662,11 @@ class BatchProcessor: ObservableObject {
                         }
                     }
                     
+                    if block.role == .body, footnotes.notes[index] == nil, languageSample.count < 4_000,
+                       block.fragments.allSatisfy({ $0.fontName != nil }) {
+                        languageSample += String(block.unifiedText.prefix(4_000 - languageSample.count)) + "\n"
+                    }
+
                     let htmlStr = LayoutEngine.toHTML(
                         block: block,
                         baseFontSize: styleRegistry.bodyFontSize,
@@ -661,6 +684,7 @@ class BatchProcessor: ObservableObject {
                     pageMD += rawTextForLLM
                 }
                 
+                var startsChapter = false
                 // 📖 智慧分章
                 if let chapterTitle = chapterStarts[pageIndex] {
                     if pageIndex == 0 {
@@ -669,6 +693,7 @@ class BatchProcessor: ObservableObject {
                     } else {
                         fullHTML += chapterNotes + "<!-- CHAPTER_SPLIT -->\n\n"
                         chapterNotes = ""
+                        startsChapter = true
                         chapterTitles.append(chapterTitle)
                         outlineDepths.append(outline[pageIndex]?.depth ?? -1)
                     }
@@ -677,17 +702,32 @@ class BatchProcessor: ObservableObject {
                        firstBlock.role == .title || firstBlock.role == .heading {
                         
                         let text = firstBlock.unifiedText.lowercased()
-                        let isChapterRegex = text.contains("chapter") || text.range(of: "^第[一二三四五六七八九十百千萬萬0-9\\s]+[章部节讲篇]", options: .regularExpression) != nil
+                        let isChapterRegex = text.contains("chapter") || text.range(of: "^第[一二三四五六七八九十百千萬萬0-9\\s]+[章部節节講讲篇卷回]", options: .regularExpression) != nil
                         
                         // 根據嚴格的語意角色來判定是否為章節起點 (避免視覺 isH1 誤導)
                         // 只有當它真正是 .title，或者明確符合章節的正則表達式時，才進行切割
                         if firstBlock.role == .title || isChapterRegex {
+                            startsChapter = true
                             fullHTML += chapterNotes + "<!-- CHAPTER_SPLIT -->\n\n"
                             chapterNotes = ""
                         }
                     }
                 }
                 
+                if document.pageCount > 50, chapterStarts.isEmpty,
+                   !startsChapter, !pageMD.isEmpty, pageIndex - chapterStartPage >= 25 {
+                    fullHTML += chapterNotes + "<!-- CHAPTER_SPLIT -->\n\n"
+                    chapterNotes = ""
+                    startsChapter = true
+                }
+                if startsChapter {
+                    chapterStartPage = pageIndex
+                } else if !pageMD.isEmpty, previousContentPage == pageIndex - 1 {
+                    fullHTML += LayoutEngine.pageBreakMarker
+                }
+                if !pageMD.isEmpty {
+                    previousContentPage = pageIndex
+                }
                 fullHTML += pageMD + "\n\n"
                 chapterNotes += pageNotes
                 
@@ -712,17 +752,18 @@ class BatchProcessor: ObservableObject {
             let bookTitle = detectedTitle ?? "Libri-AI_轉譯報告"
             
             // 在 HTML 最前面插入書名標題 (只有一份，不會重複)
-            fullHTML = "<h1 class=\"doc-title\">\(bookTitle)</h1>\n\n" + fullHTML
+            fullHTML = "<h1 class=\"doc-title\">\(EPUBSynthesizer.sanitizeForXML(bookTitle))</h1>\n\n" + fullHTML
             
             // 安全檔名：移除不安全字元
-            let safeFileName = bookTitle.replacingOccurrences(of: "/", with: "_")
-                .replacingOccurrences(of: ":", with: "_")
-                .prefix(80)
+            let safeFileName = EPUBSynthesizer.safeFilename(for: bookTitle)
             let mdURL = exportDir.appendingPathComponent("\(safeFileName).html")
             do {
                 // 儲存 HTML 備份
                 try fullHTML.write(to: mdURL, atomically: true, encoding: .utf8)
                 
+                let language = Self.detectLanguage(from: languageSample, minimumConfidence: 0.8)
+                    ?? Self.detectLanguage(from: ocrLanguageSample, minimumConfidence: 0.95)
+                    ?? .undetermined
                 let finalEPUB: URL?
                 // 🧠 智慧路由：根據頁數決定合成通道
                 if !chapterStarts.isEmpty || document.pageCount > 50 {
@@ -731,12 +772,15 @@ class BatchProcessor: ObservableObject {
                         title: bookTitle,
                         fullHTML: fullHTML,
                         assetsURL: assetsDir,
+                        language: language,
                         chapterTitles: chapterStarts.isEmpty ? nil : chapterTitles,
                         outlineDepths: outline.isEmpty ? nil : outlineDepths
                     )
                 } else {
                     AppLogger.shared.info("📄 短篇論文模式 (\(document.pageCount) 頁)，啟動標準單頁引擎...")
-                    finalEPUB = EPUBSynthesizer.createEPUB(title: bookTitle, html: fullHTML, assetsURL: assetsDir)
+                    finalEPUB = EPUBSynthesizer.createEPUB(
+                        title: bookTitle, html: fullHTML, assetsURL: assetsDir, language: language
+                    )
                 }
                 
                 if let epubFile = finalEPUB {
@@ -771,6 +815,15 @@ class BatchProcessor: ObservableObject {
     
 
 
+    private nonisolated static func detectLanguage(from sample: String, minimumConfidence: Double) -> NLLanguage? {
+        guard sample.filter(\.isLetter).count >= 100 else { return nil }
+        let recognizer = NLLanguageRecognizer()
+        recognizer.processString(sample)
+        guard let candidate = recognizer.languageHypotheses(withMaximum: 1).first,
+              candidate.value >= minimumConfidence else { return nil }
+        return candidate.key
+    }
+
     private nonisolated static func marginLineKey(text: String, bounds: CGRect, pageHeight: CGFloat) -> String? {
         guard pageHeight > 0 else { return nil }
         let atTop = bounds.maxY <= pageHeight * 0.10
@@ -804,27 +857,27 @@ class BatchProcessor: ObservableObject {
 
     private nonisolated static func sourceOutline(in document: PDFDocument) -> [Int: (title: String, depth: Int)] {
         guard let root = document.outlineRoot else { return [:] }
-        var entries: [(page: Int, title: String, depth: Int)] = []
+        var entries: [Int: (title: String, depth: Int)] = [:]
 
-        func visit(_ parent: PDFOutline, depth: Int) -> Bool {
+        func visit(_ parent: PDFOutline, depth: Int) {
             for index in 0..<parent.numberOfChildren {
-                guard let entry = parent.child(at: index),
-                      let destination = entry.destination ?? (entry.action as? PDFActionGoTo)?.destination,
-                      let page = destination.page,
-                      let title = entry.label?.trimmingCharacters(in: .whitespacesAndNewlines),
-                      !title.isEmpty else { return false }
-                let pageIndex = document.index(for: page)
-                // Page-based chapter splitting requires a unique, forward destination per entry.
-                guard pageIndex >= 0, (pageIndex < document.pageCount),
-                      pageIndex > (entries.last?.page ?? -1) else { return false }
-                entries.append((pageIndex, title, depth))
-                guard visit(entry, depth: depth + 1) else { return false }
+                guard let entry = parent.child(at: index) else { continue }
+                let destination = entry.destination ?? (entry.action as? PDFActionGoTo)?.destination
+                if let page = destination?.page,
+                   let title = entry.label?.trimmingCharacters(in: .whitespacesAndNewlines),
+                   !title.isEmpty {
+                    let pageIndex = document.index(for: page)
+                    if (0..<document.pageCount).contains(pageIndex),
+                       depth < (entries[pageIndex]?.depth ?? Int.max) {
+                        entries[pageIndex] = (title, depth)
+                    }
+                }
+                visit(entry, depth: depth + 1)
             }
-            return true
         }
 
-        guard visit(root, depth: 0), entries.count >= 3 else { return [:] }
-        return Dictionary(uniqueKeysWithValues: entries.map { ($0.page, ($0.title, $0.depth)) })
+        visit(root, depth: 0)
+        return entries
     }
 
     private nonisolated static func linkedContentsPages(

@@ -2,6 +2,29 @@ import PDFKit
 import Foundation
 
 enum PDFTextLines {
+    /// Older TCVN3 fonts can render correctly while providing no Unicode mapping.
+    nonisolated static func usesLegacyVietnameseEncoding(_ page: PDFPage) -> Bool {
+        guard let dictionary = page.pageRef?.dictionary else { return false }
+        var resources: CGPDFDictionaryRef?
+        var fonts: CGPDFDictionaryRef?
+        guard CGPDFDictionaryGetDictionary(dictionary, "Resources", &resources), let resources,
+              CGPDFDictionaryGetDictionary(resources, "Font", &fonts), let fonts else { return false }
+
+        var hasLegacyFont = false
+        CGPDFDictionaryApplyBlock(fonts, { _, object, _ in
+            var font: CGPDFDictionaryRef?
+            guard CGPDFObjectGetValue(object, .dictionary, &font), let font else { return true }
+            var baseFont: UnsafePointer<CChar>?
+            var unicode: CGPDFStreamRef?
+            guard CGPDFDictionaryGetName(font, "BaseFont", &baseFont), let baseFont,
+                  !CGPDFDictionaryGetStream(font, "ToUnicode", &unicode) else { return true }
+            let name = String(cString: baseFont).split(separator: "+").last?.lowercased() ?? ""
+            hasLegacyFont = name.hasPrefix(".vn")
+            return !hasLegacyFont
+        }, nil)
+        return hasLegacyFont
+    }
+
     nonisolated static func selections(in page: PDFPage, bounds: CGRect) -> [PDFSelection] {
         guard let selection = page.selection(for: bounds) else { return [] }
         let source = (page.string ?? "") as NSString

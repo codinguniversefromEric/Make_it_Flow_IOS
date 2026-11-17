@@ -18,8 +18,10 @@ struct ContentView: View {
     @State private var isGridView = false
     @State private var documentName = ""
     @State private var fileToDelete: LibraryItem? = nil
+    @State private var showsDeleteError = false
     @State private var showBrutalistSuccess = false
     @State private var successFileURL: URL? = nil
+    @State private var convertedBook: LibraryItem?
     @Environment(\.verticalSizeClass) private var verticalSizeClass
     @Environment(\.requestReview) private var requestReview
 
@@ -64,11 +66,12 @@ struct ContentView: View {
                     successView
                 } else if let selectedBook {
                     EPUBReaderView(file: selectedBook)
+                        .id(selectedBook.id)
                 } else {
                     ContentUnavailableView(
                         "Select an EPUB",
                         systemImage: "book",
-                        description: Text("Choose a book from your library to preview it.")
+                        description: Text("Choose a book from your library to start reading.")
                     )
                 }
             }
@@ -96,8 +99,9 @@ struct ContentView: View {
         .onChange(of: vm.batchProcessor.exportedFileURL) { newURL in
             guard let epubURL = newURL else { return }
 
-            successFileURL = epubURL
-            vm.finishConversion(epubURL: epubURL)
+            let book = vm.finishConversion(epubURL: epubURL)
+            convertedBook = book
+            successFileURL = book?.url ?? epubURL
             showBrutalistSuccess = true
 
             // Count successful conversions.
@@ -119,6 +123,9 @@ struct ContentView: View {
             Button("OK", role: .cancel) { }
         } message: {
             Text(vm.errorMessage)
+        }
+        .alert("Unable to Remove Book", isPresented: $showsDeleteError) {
+            Button("OK", role: .cancel) {}
         }
         .onOpenURL { url in
             if url.pathExtension.lowercased() == "pdf" {
@@ -384,12 +391,16 @@ struct ContentView: View {
                             .padding(.vertical, 8)
                     }
                     Button(action: {
-                        vm.libraryStore.deleteItem(file)
-                        if selectedBookID == file.id {
-                            selectedBookID = nil
-                            compactColumn = .sidebar
-                        }
                         fileToDelete = nil
+                        do {
+                            try vm.libraryStore.deleteItem(file)
+                            if selectedBookID == file.id {
+                                selectedBookID = nil
+                                compactColumn = .sidebar
+                            }
+                        } catch {
+                            showsDeleteError = true
+                        }
                     }) {
                         Text("DELETE")
                             .font(.system(size: 12, weight: .bold, design: .monospaced))
@@ -490,23 +501,28 @@ struct ContentView: View {
             Spacer()
             
             VStack(spacing: 12) {
+                if let convertedBook {
+                    Button {
+                        selectBook(convertedBook)
+                    } label: {
+                        Label("Read Now", systemImage: "book")
+                            .font(.custom("Times New Roman", size: 16).bold())
+                            .foregroundStyle(Color(uiColor: .systemBackground))
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 16)
+                            .background(Color.primary)
+                    }
+                    .buttonStyle(.plain)
+                }
+
                 if let successFileURL {
                     ShareLink(item: successFileURL) {
-                        VStack(spacing: 2) {
-                            Text("EXPORT EPUB")
-                                .font(.custom("Times New Roman", size: 12))
-                                .fontWeight(.bold)
-                                .tracking(2)
-                            Text("(SHARE TO APPLE BOOKS)")
-                                .font(.system(size: 8, weight: .bold, design: .monospaced))
-                        }
-                        .fontWeight(.bold)
-                        .tracking(2)
-                        .foregroundColor(Color(UIColor.systemBackground))
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 16)
-                        .background(Color.primary)
-                        .border(Color.primary, width: 3)
+                        Text("Export EPUB")
+                            .font(.custom("Times New Roman", size: 14).bold())
+                            .foregroundStyle(Color.primary)
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 12)
+                            .border(Color.primary, width: 2)
                     }
                     .buttonStyle(.plain)
                 }

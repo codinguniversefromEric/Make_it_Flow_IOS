@@ -13,10 +13,6 @@ import Vision
 
 enum LayoutEngine: Sendable {
 
-    // MARK: - Cached Regex Patterns
-    private static let eqRegex = try! NSRegularExpression(pattern: "(?i)(Accuracy|Precision|Sensitivity|score|Recall|Specificity)\\s*\u{FFFD}\\s*")
-    private static let mulRegex = try! NSRegularExpression(pattern: "([0-9A-Za-z])\\s*\u{FFFD}\\s*([0-9A-Za-z])")
-
     // MARK: - 1. 基於 LayoutBlock 的核心處理流程
 
     /// 使用 YOLO 給出的區塊，將 PDFKit 散落的文字碎片重新排序與封裝
@@ -34,9 +30,6 @@ enum LayoutEngine: Sendable {
         pageHeight: CGFloat
     ) -> [ParagraphBlock] {
         guard !fragments.isEmpty else { return [] }
-        guard !blocks.isEmpty else {
-            return []
-        }
 
         // 1. 幾何排序 YOLO 區塊 (Reading Order Algorithm)
         let sortedBlocks = sortLayoutBlocks(blocks, pageWidth: pageWidth, pageHeight: pageHeight)
@@ -309,6 +302,8 @@ enum LayoutEngine: Sendable {
 
     /// 根據人類閱讀邏輯 (先上後下，先左後右)，對 YOLO 區塊進行幾何排序
     private nonisolated static func sortLayoutBlocks(_ blocks: [LayoutBlock], pageWidth: CGFloat, pageHeight: CGFloat) -> [LayoutBlock] {
+        guard blocks.count > 1 else { return blocks }
+
         // 先換算成顯示座標的 CGRect
         let rectBlocks: [(block: LayoutBlock, rect: CGRect)] = blocks.map {
             let rect = VNImageRectForNormalizedRect($0.boundingBox, Int(pageWidth), Int(pageHeight))
@@ -426,28 +421,13 @@ enum LayoutEngine: Sendable {
     }
 
     private nonisolated static func buildParagraphBlock(from fragments: [TextFragment], role: SemanticRole) -> ParagraphBlock {
-        // 先對每個 fragment 執行 OCR 亂碼修復 (數學符號等)
-        let sanitizedFragments = fragments.map { frag -> TextFragment in
-            let text = sanitizeScientificOCR(frag.text)
-            return TextFragment(
-                text: text,
-                bounds: frag.bounds,
-                fontSize: frag.fontSize,
-                fontName: frag.fontName,
-                isBold: frag.isBold,
-                isItalic: frag.isItalic,
-                colorHex: frag.colorHex,
-                footnoteMarkers: text == frag.text ? frag.footnoteMarkers : []
-            )
-        }
-
         // 計算外接矩形
         var minX = CGFloat.greatestFiniteMagnitude
         var minY = CGFloat.greatestFiniteMagnitude
         var maxX: CGFloat = 0
         var maxY: CGFloat = 0
 
-        for frag in sanitizedFragments {
+        for frag in fragments {
             minX = min(minX, frag.bounds.minX)
             minY = min(minY, frag.bounds.minY)
             maxX = max(maxX, frag.bounds.maxX)
@@ -456,15 +436,10 @@ enum LayoutEngine: Sendable {
 
         let bounds = CGRect(x: minX, y: minY, width: maxX - minX, height: maxY - minY)
 
-        // 斷字修復
-        let lines = sanitizedFragments.map { $0.text }
-        var unified = recoverHyphenation(lines: lines)
-        
-        // 再次確保 unified 也是乾淨的 (其實上面已經修復過每個碎片了，但為保險再過一次)
-        unified = sanitizeScientificOCR(unified)
+        let unified = joinLines(lines: fragments.map(\.text))
 
         return ParagraphBlock(
-            fragments: sanitizedFragments,
+            fragments: fragments,
             role: role,
             unifiedText: unified,
             bounds: bounds
@@ -479,8 +454,8 @@ enum LayoutEngine: Sendable {
         ) != nil
     }
 
-    /// 修復跨行斷字 (e.g., "hyperdon-" + "tia" → "hyperdontia")
-    private nonisolated static func recoverHyphenation(lines: [String]) -> String {
+    /// Join physical lines while preserving characters from the source.
+    private nonisolated static func joinLines(lines: [String]) -> String {
         var parts: [String] = []
 
         for line in lines {
@@ -488,9 +463,9 @@ enum LayoutEngine: Sendable {
             guard !trimmed.isEmpty else { continue }
 
             if let lastPart = parts.last, lastPart.hasSuffix("-"),
-               let lastChar = lastPart.dropLast().last, lastChar.isLetter {
-                // 發現斷字：移除末尾連字號，直接拼接下一行的第一個詞
-                parts[parts.count - 1] = String(lastPart.dropLast()) + trimmed
+               let lastChar = lastPart.dropLast().last, lastChar.isLetter,
+               trimmed.first?.isLowercase == true {
+                parts[parts.count - 1] += trimmed
             } else if let last = parts.last?.last, let first = trimmed.first,
                       isEastAsianBoundary(last) || isEastAsianBoundary(first) {
                 parts[parts.count - 1] += trimmed
@@ -502,25 +477,6 @@ enum LayoutEngine: Sendable {
         return parts.joined(separator: " ")
     }
 
-    /// 針對論文常見的 PDF 字體亂碼進行修正
-    private nonisolated static func sanitizeScientificOCR(_ text: String) -> String {
-        var clean = text
-        
-        // 修正加號
-        clean = clean.replacingOccurrences(of: "þ", with: "+")
-        
-        // 將常見的評估指標後方的亂碼視為等號
-        clean = Self.eqRegex.stringByReplacingMatches(in: clean, range: NSRange(clean.startIndex..., in: clean), withTemplate: "$1 = ")
-        
-        // 將被夾在字母數字中間的亂碼視為乘號
-        clean = Self.mulRegex.stringByReplacingMatches(in: clean, range: NSRange(clean.startIndex..., in: clean), withTemplate: "$1 * $2")
-        
-        // 清除剩餘無法辨識的亂碼
-        clean = clean.replacingOccurrences(of: "\u{FFFD}", with: " ")
-        
-        return clean
-    }
-    
     nonisolated static func shouldDrop(block: ParagraphBlock, pageHeight: CGFloat) -> Bool {
         // Check the entire block so a paragraph that extends into the margin survives.
         let isInTopMargin = block.bounds.maxY <= pageHeight * 0.10
@@ -646,7 +602,7 @@ enum LayoutEngine: Sendable {
         var innerHTML = ""
         for (index, frag) in block.fragments.enumerated() {
             // 去除 PDF 行首與行尾的排版空白，再合併行內連續空白。
-            var text = frag.text.trimmingCharacters(in: .whitespacesAndNewlines)
+            let text = frag.text.trimmingCharacters(in: .whitespacesAndNewlines)
                 .replacingOccurrences(of: #"[ \t\r\n]+"#, with: " ", options: .regularExpression)
             
             // 使用相對比例 (em)，允許閱讀器自適應字體大小
@@ -691,40 +647,20 @@ enum LayoutEngine: Sendable {
             if isItalic { style += " font-style: italic;" }
             if frag.colorHex != "#000000" { style += " color: \(frag.colorHex);" }
             
-            // 判斷是否需要加入空白 (處理英文斷字、中文連續不斷字、以及 URL 換行)
-            var needsTrailingSpace = false
-            var removedHyphen = false
-            
-            if index < block.fragments.count - 1 {
-                let nextFrag = block.fragments[index + 1]
-                let nextRaw = nextFrag.text.trimmingCharacters(in: .whitespacesAndNewlines)
-                
-                if let cLast = text.last, let nFirst = nextRaw.first {
-                    // 英文斷字修復 (e.g., hyphen- + ated -> hyphenated)
-                    if cLast == "-", let charBeforeHyphen = text.dropLast().last {
-                        if charBeforeHyphen.isASCII && charBeforeHyphen.isLetter && nFirst.isASCII && nFirst.isLetter {
-                            text.removeLast()
-                            removedHyphen = true
-                            needsTrailingSpace = false
-                        }
-                    }
-                    
-                    if !removedHyphen && !isEastAsianBoundary(cLast) && !isEastAsianBoundary(nFirst) {
-                        // 針對 URL 被切斷的情況，如果兩端都是 ASCII，但不都是字母/數字，可能是 URL 斷行 (例如 = 和 &)，不加空白
-                        let cAlnum = cLast.isLetter || cLast.isNumber
-                        let nAlnum = nFirst.isLetter || nFirst.isNumber
-                        let cPunct = [".", ",", "!", "?", ":", ";", "]", ")", "”", "\""].contains(cLast)
-                        let nOpen = ["[", "(", "“", "\""].contains(nFirst)
-                        
-                        if cAlnum && nAlnum {
-                            needsTrailingSpace = true
-                        } else if cPunct && nAlnum {
-                            needsTrailingSpace = true
-                        } else if cAlnum && nOpen {
-                            needsTrailingSpace = true
-                        }
-                    }
-                }
+            let needsTrailingSpace: Bool
+            if index + 1 < block.fragments.count,
+               let last = text.last,
+               let first = block.fragments[index + 1].text.trimmingCharacters(in: .whitespacesAndNewlines).first {
+                let isHyphenatedWord = last == "-" && first.isLowercase &&
+                    (text.dropLast().last?.isLetter ?? false)
+                let isURLContinuation = text.split(whereSeparator: \.isWhitespace).last.map {
+                    $0.hasPrefix("https://") || $0.hasPrefix("http://") || $0.hasPrefix("www.")
+                } ?? false
+                needsTrailingSpace = !isHyphenatedWord && !isURLContinuation &&
+                    !isEastAsianBoundary(last) && !isEastAsianBoundary(first) &&
+                    !"([{“‘".contains(last) && !".,;:!?%)]}”’".contains(first)
+            } else {
+                needsTrailingSpace = false
             }
 
             let escapedText = renderFootnoteReferences(in: text, fragment: frag, links: footnoteLinks)
@@ -777,42 +713,30 @@ enum LayoutEngine: Sendable {
 
     // MARK: - 跨頁段落縫合 (Cross-Page Stitching)
     
-    /// 基於啟發式法則 (標點符號與大小寫) 自動縫合因 PDF 換頁而被強制截斷的段落
+    nonisolated static let pageBreakMarker = "<!-- PDF_PAGE_BREAK -->"
+
+    /// Only consider paragraph pairs separated by an actual PDF page boundary.
     nonisolated static func stitchCrossPageParagraphs(html: String) -> String {
+        let marker = NSRegularExpression.escapedPattern(for: pageBreakMarker)
+        let join = #"\s*<\/span>\s*)</p>\s*"# + marker + #"\s*<p class="doc-body">(\s*<span[^>]*>\s*"#
+        let rules = [
+            (#"([A-Za-z]-)("# + join + #"[a-z])"#, "$1$2$3"),
+            (#"([A-Za-z0-9,%])("# + join + #"[a-z0-9])"#, "$1$2 $3"),
+            (#"([\p{Han}，、])("# + join + #"[\p{Han}])"#, "$1$2$3"),
+        ]
         var result = html
-        var previous = ""
-        
-        // 1. 英文跨頁斷字 (e.g. hyphen- \n ated -> hyphenated)
-        // 斷字後下一頁必定是小寫字母
-        let hyphenPattern = "([a-zA-Z])-(\\s*</span>\\s*)</p>\\s*<p class=\"doc-body\">(\\s*<span[^>]*>\\s*[a-z])"
-        if let hyphenRegex = try? NSRegularExpression(pattern: hyphenPattern, options: []) {
-            while result != previous {
+        for (pattern, replacement) in rules {
+            let regex = try! NSRegularExpression(pattern: pattern)
+            var previous: String
+            repeat {
                 previous = result
-                result = hyphenRegex.stringByReplacingMatches(in: result, options: [], range: NSRange(location: 0, length: result.utf16.count), withTemplate: "$1$2$3")
-            }
+                result = regex.stringByReplacingMatches(
+                    in: result,
+                    range: NSRange(result.startIndex..., in: result),
+                    withTemplate: replacement
+                )
+            } while result != previous
         }
-        
-        // 2. 英文跨頁正常連接 (ASCII to ASCII) -> 補上空白
-        previous = ""
-        let asciiPattern = "([a-zA-Z0-9,])(\\s*</span>\\s*)</p>\\s*<p class=\"doc-body\">(\\s*<span[^>]*>\\s*[a-z0-9])"
-        if let asciiRegex = try? NSRegularExpression(pattern: asciiPattern, options: []) {
-            while result != previous {
-                previous = result
-                result = asciiRegex.stringByReplacingMatches(in: result, options: [], range: NSRange(location: 0, length: result.utf16.count), withTemplate: "$1$2 $3")
-            }
-        }
-        
-        // 3. 中文/其他跨頁連接 -> 不加空白
-        // 匹配條件：前一段結尾不是終結標點符號，下一段開頭是中文字或小寫字母/數字
-        previous = ""
-        let defaultPattern = "([^.!?:;。！？：；>”\"’'-])(\\s*</span>\\s*)</p>\\s*<p class=\"doc-body\">(\\s*<span[^>]*>\\s*[a-z0-9\\p{Han}])"
-        if let defaultRegex = try? NSRegularExpression(pattern: defaultPattern, options: []) {
-            while result != previous {
-                previous = result
-                result = defaultRegex.stringByReplacingMatches(in: result, options: [], range: NSRange(location: 0, length: result.utf16.count), withTemplate: "$1$2$3")
-            }
-        }
-        
-        return result
+        return result.replacingOccurrences(of: pageBreakMarker, with: "")
     }
 }

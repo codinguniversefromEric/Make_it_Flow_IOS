@@ -7,6 +7,7 @@
 //
 
 import Foundation
+import NaturalLanguage
 
 /// 負責將 XHTML 內容轉換並封裝為合規的 EPUB 檔案
 final class EPUBSynthesizer: Sendable {
@@ -157,10 +158,24 @@ final class EPUBSynthesizer: Sendable {
 
     // MARK: - 標準通道：單頁論文引擎
 
+    nonisolated static func safeFilename(for title: String) -> String {
+        let separators = CharacterSet(charactersIn: "/:\\").union(.controlCharacters)
+        let cleaned = title.components(separatedBy: separators).joined(separator: "_")
+            .trimmingCharacters(in: .whitespacesAndNewlines.union(CharacterSet(charactersIn: ".")))
+        var filename = ""
+        for character in cleaned {
+            guard filename.utf8.count + String(character).utf8.count <= 200 else { break }
+            filename.append(character)
+        }
+        return filename.isEmpty ? "Document" : filename
+    }
+
     /// 建立單頁或無分章論文的 EPUB 檔案
-    nonisolated static func createEPUB(title: String, html: String, assetsURL: URL) -> URL? {
+    nonisolated static func createEPUB(
+        title: String, html: String, assetsURL: URL, language: NLLanguage = .undetermined
+    ) -> URL? {
         let fm = FileManager.default
-        let epubURL = fm.temporaryDirectory.appendingPathComponent("\(title).epub")
+        let epubURL = fm.temporaryDirectory.appendingPathComponent(safeFilename(for: title)).appendingPathExtension("epub")
         let bookUUID = UUID().uuidString
         
         do {
@@ -183,13 +198,15 @@ final class EPUBSynthesizer: Sendable {
             let fullHTML = """
             <?xml version="1.0" encoding="utf-8"?>
             <!DOCTYPE html>
-            <html xmlns="http://www.w3.org/1999/xhtml" xmlns:epub="http://www.idpf.org/2007/ops">
+            <html xmlns="http://www.w3.org/1999/xhtml" xmlns:epub="http://www.idpf.org/2007/ops" lang="\(language.rawValue)" xml:lang="\(language.rawValue)">
             <head>
                 <title>\(sanitizeForXML(title))</title>
                 <meta charset="utf-8"/>
                 <style>
                     body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; line-height: 1.6; padding: 4%; color: #1c1c1e; background-color: #ffffff; }
                     p { margin-bottom: 1.2em; text-indent: 0; text-align: left; overflow-wrap: break-word; word-break: break-word; }
+                    .doc-table { border-collapse: collapse; margin: 1em 0; max-width: 100%; font-size: 0.9em; }
+                    .doc-table td { border: 1px solid currentColor; padding: 0.25em 0.4em; overflow-wrap: anywhere; }
                     h1, h2, h3 { font-weight: 700; letter-spacing: -0.02em; color: #000000; margin-top: 1.8em; margin-bottom: 0.8em; }
                     h1.doc-title { font-size: 2.2em; text-align: center; margin-bottom: 1.5em; }
                     img { max-width: 100%; height: auto; display: block; margin: 30px auto; border-radius: 12px; }
@@ -222,7 +239,7 @@ final class EPUBSynthesizer: Sendable {
             // 📖 從實際標題建構 TOC
             var navLinks = buildNavLinks(entries: tocEntries, xhtmlFile: "chapter.xhtml")
             if navLinks.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                navLinks = "<li><a href=\"chapter_1.xhtml\">正文</a></li>\n"
+                navLinks = "<li><a href=\"chapter.xhtml\">正文</a></li>\n"
             }
             
             let navHTML = """
@@ -241,7 +258,10 @@ final class EPUBSynthesizer: Sendable {
             if fm.fileExists(atPath: assetsURL.path),
                let images = try? fm.contentsOfDirectory(atPath: assetsURL.path) {
                 for (index, image) in images.enumerated() where !image.hasPrefix(".") {
-                    imageItems += "<item id=\"img\(index)\" href=\"assets/\(image)\" media-type=\"image/png\"/>\n"
+                    let ext = (image as NSString).pathExtension.lowercased()
+                    let mediaType = ext == "jpg" || ext == "jpeg" ? "image/jpeg" : "image/png"
+                    let properties = image == "cover.jpg" ? " properties=\"cover-image\"" : ""
+                    imageItems += "<item id=\"img\(index)\" href=\"assets/\(image)\" media-type=\"\(mediaType)\"\(properties)/>\n"
                 }
             }
             
@@ -250,8 +270,9 @@ final class EPUBSynthesizer: Sendable {
             <package xmlns="http://www.idpf.org/2007/opf" version="3.0" unique-identifier="pub-id">
                 <metadata xmlns:dc="http://purl.org/dc/elements/1.1/">
                     <dc:title>\(sanitizeForXML(title))</dc:title>
-                    <dc:language>zh-TW</dc:language>
+                    <dc:language>\(language.rawValue)</dc:language>
                     <dc:identifier id="pub-id">urn:uuid:\(bookUUID)</dc:identifier>
+                    <meta property="dcterms:modified">\(ISO8601DateFormatter().string(from: Date()))</meta>
                 </metadata>
                 <manifest>
                     <item id="nav" href="nav.xhtml" media-type="application/xhtml+xml" properties="nav"/>
@@ -283,8 +304,7 @@ final class EPUBSynthesizer: Sendable {
             
             // 寫入合規 EPUB ZIP
             let archiveData = try StoredZIPArchive(entries: entries).data()
-            if fm.fileExists(atPath: epubURL.path) { try fm.removeItem(at: epubURL) }
-            try archiveData.write(to: epubURL)
+            try archiveData.write(to: epubURL, options: .atomic)
             
             return epubURL
         } catch {
@@ -300,11 +320,12 @@ final class EPUBSynthesizer: Sendable {
         title: String,
         fullHTML: String,
         assetsURL: URL,
+        language: NLLanguage = .undetermined,
         chapterTitles: [String]? = nil,
         outlineDepths: [Int]? = nil
     ) -> URL? {
         let fm = FileManager.default
-        let epubURL = fm.temporaryDirectory.appendingPathComponent("\(title).epub")
+        let epubURL = fm.temporaryDirectory.appendingPathComponent(safeFilename(for: title)).appendingPathExtension("epub")
         let bookUUID = UUID().uuidString
         
         do {
@@ -346,13 +367,15 @@ final class EPUBSynthesizer: Sendable {
                 let fullHTML = """
                 <?xml version="1.0" encoding="utf-8"?>
                 <!DOCTYPE html>
-                <html xmlns="http://www.w3.org/1999/xhtml" xmlns:epub="http://www.idpf.org/2007/ops">
+                <html xmlns="http://www.w3.org/1999/xhtml" xmlns:epub="http://www.idpf.org/2007/ops" lang="\(language.rawValue)" xml:lang="\(language.rawValue)">
                 <head>
                     <title>\(safeTitle)</title>
                     <meta charset="utf-8"/>
                     <style>
                         body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; line-height: 1.6; padding: 4%; color: #1c1c1e; background-color: #ffffff; }
                         p { margin-bottom: 1.2em; text-indent: 0; text-align: left; overflow-wrap: break-word; word-break: break-word; }
+                        .doc-table { border-collapse: collapse; margin: 1em 0; max-width: 100%; font-size: 0.9em; }
+                        .doc-table td { border: 1px solid currentColor; padding: 0.25em 0.4em; overflow-wrap: anywhere; }
                         h1, h2, h3 { font-weight: 700; letter-spacing: -0.02em; color: #000000; margin-top: 1.8em; margin-bottom: 0.8em; }
                         h1.doc-title { font-size: 2.2em; text-align: center; margin-bottom: 1.5em; }
                         img { max-width: 100%; height: auto; display: block; margin: 30px auto; border-radius: 12px; }
@@ -521,8 +544,9 @@ final class EPUBSynthesizer: Sendable {
             <package xmlns="http://www.idpf.org/2007/opf" version="3.0" unique-identifier="pub-id">
                 <metadata xmlns:dc="http://purl.org/dc/elements/1.1/">
                     <dc:title>\(sanitizeForXML(title))</dc:title>
-                    <dc:language>zh-TW</dc:language>
+                    <dc:language>\(language.rawValue)</dc:language>
                     <dc:identifier id="pub-id">urn:uuid:\(bookUUID)</dc:identifier>
+                    <meta property="dcterms:modified">\(ISO8601DateFormatter().string(from: Date()))</meta>
                 </metadata>
                 <manifest>
                     <item id="nav" href="nav.xhtml" media-type="application/xhtml+xml" properties="nav"/>
@@ -565,8 +589,7 @@ final class EPUBSynthesizer: Sendable {
             
             // 寫入合規 EPUB ZIP
             let archiveData = try StoredZIPArchive(entries: entries).data()
-            if fm.fileExists(atPath: epubURL.path) { try fm.removeItem(at: epubURL) }
-            try archiveData.write(to: epubURL)
+            try archiveData.write(to: epubURL, options: .atomic)
             
             return epubURL
         } catch {

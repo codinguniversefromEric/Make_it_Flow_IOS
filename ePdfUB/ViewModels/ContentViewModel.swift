@@ -137,13 +137,20 @@ class ContentViewModel: ObservableObject {
     }
     
     // 完成轉換後的處理邏輯
-    func finishConversion(epubURL: URL) {
-        libraryStore.addItem(
-            url: epubURL,
-            title: epubURL.deletingPathExtension().lastPathComponent,
-            thumbnail: self.currentThumbnail,
-            diagnosticsSummary: ""
-        )
+    func finishConversion(epubURL: URL) -> LibraryItem? {
+        let item: LibraryItem?
+        do {
+            item = try libraryStore.addItem(
+                url: epubURL,
+                title: epubURL.deletingPathExtension().lastPathComponent,
+                thumbnail: currentThumbnail,
+                diagnosticsSummary: ""
+            )
+        } catch {
+            item = nil
+            errorMessage = String(localized: "The EPUB was converted but could not be saved to the library. Use Export EPUB to save a copy.")
+            showErrorAlert = true
+        }
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [self] in
             withAnimation(.easeInOut(duration: 0.5)) {
                 animState = .idle
@@ -158,6 +165,7 @@ class ContentViewModel: ObservableObject {
                 }
             }
         }
+        return item
     }
     
 
