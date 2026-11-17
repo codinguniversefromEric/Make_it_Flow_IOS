@@ -8,6 +8,11 @@
 import Foundation
 import CoreGraphics
 import Vision
+#if os(iOS)
+import UIKit
+#elseif os(macOS)
+import AppKit
+#endif
 
 // MARK: - 佈局分析引擎：基於 YOLO 區塊的語意重組與幾何排序
 
@@ -648,14 +653,18 @@ enum LayoutEngine: Sendable {
             if frag.colorHex != "#000000" { style += " color: \(frag.colorHex);" }
             
             let needsTrailingSpace: Bool
+            var marksWordWrap = false
             if index + 1 < block.fragments.count,
                let last = text.last,
                let first = block.fragments[index + 1].text.trimmingCharacters(in: .whitespacesAndNewlines).first {
-                let isHyphenatedWord = last == "-" && first.isLowercase &&
+                let next = block.fragments[index + 1]
+                let isHyphenatedWord = "-\u{00AD}".contains(last) && first.isLowercase &&
                     (text.dropLast().last?.isLetter ?? false)
                 let isURLContinuation = text.split(whereSeparator: \.isWhitespace).last.map {
                     $0.hasPrefix("https://") || $0.hasPrefix("http://") || $0.hasPrefix("www.")
                 } ?? false
+                marksWordWrap = isHyphenatedWord && !isURLContinuation &&
+                    readingLineY(next) - readingLineY(frag) > max(2, min(frag.fontSize, next.fontSize) * 0.45)
                 needsTrailingSpace = !isHyphenatedWord && !isURLContinuation &&
                     !isEastAsianBoundary(last) && !isEastAsianBoundary(first) &&
                     !"([{“‘".contains(last) && !".,;:!?%)]}”’".contains(first)
@@ -664,7 +673,9 @@ enum LayoutEngine: Sendable {
             }
 
             let escapedText = renderFootnoteReferences(in: text, fragment: frag, links: footnoteLinks)
-            innerHTML += "<span style=\"\(style)\">\(escapedText)</span>" + (needsTrailingSpace ? " " : "")
+            innerHTML += "<span style=\"\(style)\">\(escapedText)"
+            if marksWordWrap { innerHTML += wordWrapMarker }
+            innerHTML += "</span>" + (needsTrailingSpace ? " " : "")
         }
         
         if let footnoteID {
@@ -714,15 +725,95 @@ enum LayoutEngine: Sendable {
     // MARK: - 跨頁段落縫合 (Cross-Page Stitching)
     
     nonisolated static let pageBreakMarker = "<!-- PDF_PAGE_BREAK -->"
+    private nonisolated static let wordWrapMarker = "<!-- PDF_WORD_WRAP -->"
+
+    /// Only inspect hyphens at recorded line or page breaks.
+    nonisolated static func repairWrappedWords(html: String) async -> String {
+        guard html.contains(wordWrapMarker) else { return html }
+        let marker = NSRegularExpression.escapedPattern(for: wordWrapMarker)
+        let pattern = #"(?:^|[>\s(“‘-])([A-Za-z]+)([-\u00AD])"# + marker
+            + #"</span>\s*(?:<span id="pdf-contents-[0-9]+"></span>)*<span[^>]*>\s*([a-z]+)(?![A-Za-z0-9_/])"#
+        let regex = try! NSRegularExpression(pattern: pattern)
+        let candidates = regex.matches(in: html, range: NSRange(html.startIndex..., in: html)).compactMap { match
+            -> (range: NSRange, left: String, right: String, softHyphen: Bool)? in
+            guard let left = Range(match.range(at: 1), in: html),
+                  let hyphen = Range(match.range(at: 2), in: html),
+                  let right = Range(match.range(at: 3), in: html) else { return nil }
+            return (match.range(at: 2), String(html[left]), String(html[right]), html[hyphen] == "\u{00AD}")
+        }
+        guard !candidates.isEmpty else {
+            return html.replacingOccurrences(of: wordWrapMarker, with: "")
+        }
+
+        // Markup separates fragments so a wrapped spelling does not count as
+        // evidence that the author used a hyphen in ordinary running text.
+        let plainText = html.replacingOccurrences(of: "<[^>]+>", with: " ", options: .regularExpression)
+        let candidateSpellings = Set(candidates.flatMap { [
+            ($0.left + $0.right).lowercased(), ($0.left + "-" + $0.right).lowercased()
+        ] })
+        var occurrences: [String: Int] = [:]
+        for token in plainText.matches(of: #/[A-Za-z]+(?:-[A-Za-z]+)*/#) {
+            let word = token.output.lowercased()
+            if candidateSpellings.contains(word) { occurrences[word, default: 0] += 1 }
+        }
+
+        return await applyWordWrapRepairs(html: html, candidates: candidates, occurrences: occurrences)
+    }
+
+    @MainActor
+    private static func applyWordWrapRepairs(
+        html: String,
+        candidates: [(range: NSRange, left: String, right: String, softHyphen: Bool)],
+        occurrences: [String: Int]
+    ) -> String {
+        var knownWords: [String: Bool] = [:]
+#if os(iOS)
+        let checker = UITextChecker()
+#elseif os(macOS)
+        let checker = NSSpellChecker.shared
+#endif
+        func isKnown(_ word: String) -> Bool {
+            let word = word.lowercased()
+            if let known = knownWords[word] { return known }
+#if os(iOS)
+            let misspelling = checker.rangeOfMisspelledWord(
+                in: word, range: NSRange(word.startIndex..., in: word),
+                startingAt: 0, wrap: false, language: "en_US"
+            )
+#elseif os(macOS)
+            let misspelling = checker.checkSpelling(
+                of: word, startingAt: 0, language: "en_US", wrap: false,
+                inSpellDocumentWithTag: 0, wordCount: nil
+            )
+#endif
+            let known = misspelling.location == NSNotFound
+            knownWords[word] = known
+            return known
+        }
+
+        let result = NSMutableString(string: html)
+        for candidate in candidates.reversed() {
+            let joined = (candidate.left + candidate.right).lowercased()
+            let hyphenated = (candidate.left + "-" + candidate.right).lowercased()
+            let prefersJoined = occurrences[joined, default: 0] >= 2
+            let usesHyphen = occurrences[hyphenated, default: 0] > 0
+            if candidate.softHyphen || (!usesHyphen &&
+                (prefersJoined || (isKnown(joined) && !(isKnown(candidate.left) && isKnown(candidate.right))))) {
+                result.deleteCharacters(in: candidate.range)
+            }
+        }
+        return (result as String).replacingOccurrences(of: wordWrapMarker, with: "")
+    }
 
     /// Only consider paragraph pairs separated by an actual PDF page boundary.
     nonisolated static func stitchCrossPageParagraphs(html: String) -> String {
         let marker = NSRegularExpression.escapedPattern(for: pageBreakMarker)
-        let join = #"\s*<\/span>\s*)</p>\s*"# + marker + #"\s*<p class="doc-body">(\s*<span[^>]*>\s*"#
+        let join = #"\s*<\/span>\s*)</p>\s*"# + marker
+            + #"\s*((?:<span id="pdf-contents-[0-9]+"></span>)*)<p class="doc-body">(\s*<span[^>]*>\s*"#
         let rules = [
-            (#"([A-Za-z]-)("# + join + #"[a-z])"#, "$1$2$3"),
-            (#"([A-Za-z0-9,%])("# + join + #"[a-z0-9])"#, "$1$2 $3"),
-            (#"([\p{Han}，、])("# + join + #"[\p{Han}])"#, "$1$2$3"),
+            (#"([A-Za-z][-\u00AD])("# + join + #"[a-z])"#, "$1" + wordWrapMarker + "$2$3$4"),
+            (#"([A-Za-z0-9,%])("# + join + #"[a-z0-9])"#, "$1$2$3 $4"),
+            (#"([\p{Han}，、])("# + join + #"[\p{Han}])"#, "$1$2$3$4"),
         ]
         var result = html
         for (pattern, replacement) in rules {

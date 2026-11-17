@@ -2,6 +2,64 @@ import PDFKit
 import Foundation
 
 enum PDFTextLines {
+    nonisolated static func repairDimensionSymbols(_ text: String) -> String {
+        guard text.contains("\u{FFFD}"),
+              text.range(of: #"\b(?:resolution\s+of|normalized(?:\s+to)?\s+[0-9]|kernel\s+sizes?|MBConv\s+[0-9]|[0-9]\s*�\s*[0-9]+(?:\.[0-9]+)?\s+(?:cm\)|convolutional))"#,
+                         options: [.regularExpression, .caseInsensitive]) != nil else { return text }
+        return text.replacingOccurrences(of: #"(?<=[0-9])\h*�\h*(?=[0-9])"#,
+                                         with: " × ", options: .regularExpression)
+    }
+
+    nonisolated static func repairMetricDefinition(_ text: String) -> String {
+        guard let separator = text.firstIndex(of: "\u{FFFD}"), text.contains("þ"),
+              text.range(of: #"^\s*(?:Accuracy|Precision|Sensitivity|F1 score)\s*�\s*(?:\(|TP\s*/)"#,
+                         options: .regularExpression) != nil else { return text }
+        let label = text[..<separator].trimmingCharacters(in: .whitespaces)
+        let expression = text[text.index(after: separator)...].trimmingCharacters(in: .whitespaces)
+            .replacingOccurrences(of: "þ", with: "+")
+        if label == "F1 score" {
+            return label + " = " + expression.replacingOccurrences(of: "�", with: "×")
+        }
+        return label + " = " + expression
+    }
+
+    /// Some TeX symbol fonts map several distinct operators to U+FFFD in their
+    /// text layer. The rendered page still contains the correct glyphs.
+    nonisolated static func malformedNumberedFormulaBounds(
+        in fragments: [TextFragment], pageSize: CGSize
+    ) -> [CGRect] {
+        let damagedNumber = #"ð\s*[0-9]{1,3}\s*Þ\s*$"#
+        let markers = fragments.indices.filter {
+            fragments[$0].text.range(of: damagedNumber, options: .regularExpression) != nil
+        }
+        var rowsByMarker: [Int: [TextFragment]] = [:]
+        for line in fragments {
+            guard let marker = markers.filter({ index in
+                let anchor = fragments[index]
+                return (anchor.bounds.maxX <= pageSize.width / 2) == (line.bounds.midX <= pageSize.width / 2) &&
+                    abs(anchor.bounds.midY - line.bounds.midY) <= max(anchor.fontSize, line.fontSize) * 1.9
+            }).min(by: {
+                abs(fragments[$0].bounds.midY - line.bounds.midY) <
+                    abs(fragments[$1].bounds.midY - line.bounds.midY)
+            }) else { continue }
+
+            let hasDamagedOperator = line.text.contains("\u{FFFD}") || line.text.contains("þ") ||
+                line.text.range(of: damagedNumber, options: .regularExpression) != nil
+            let isShortMathLine = line.text.range(of: #"^\s*[A-Za-z0-9()\s./+−=]+\s*$"#, options: .regularExpression) != nil &&
+                line.text.split(whereSeparator: \.isWhitespace).count <= 2 &&
+                line.text.count <= 12
+            if hasDamagedOperator || isShortMathLine { rowsByMarker[marker, default: []].append(line) }
+        }
+
+        return markers.compactMap { marker in
+            guard let rows = rowsByMarker[marker], rows.contains(where: { $0.text.contains("\u{FFFD}") }) else {
+                return nil
+            }
+            let bounds = rows.reduce(CGRect.null) { $0.union($1.bounds) }
+            return bounds.insetBy(dx: -4, dy: -1).intersection(CGRect(origin: .zero, size: pageSize))
+        }
+    }
+
     /// Older TCVN3 fonts can render correctly while providing no Unicode mapping.
     nonisolated static func usesLegacyVietnameseEncoding(_ page: PDFPage) -> Bool {
         guard let dictionary = page.pageRef?.dictionary else { return false }

@@ -103,15 +103,23 @@ class BatchProcessor: ObservableObject {
             var previousContentPage: Int?
             var chapterStartPage = 0
             let pdfBookmarks = Self.sourceOutline(in: document)
-            let numberedChapters = pdfBookmarks.isEmpty ? Self.numberedChapterStarts(in: document) : [:]
-            let printedOutline = pdfBookmarks.isEmpty && numberedChapters.isEmpty
+            let chineseOutline = pdfBookmarks.isEmpty ? PDFPrintedOutline.readChinese(document) : nil
+            let sourceEntries = chineseOutline?.entries ?? pdfBookmarks
+            let entriesByPage = Dictionary(grouping: sourceEntries, by: \.page)
+            let numberedChapters = sourceEntries.isEmpty ? Self.numberedChapterStarts(in: document) : [:]
+            let printedOutline = pdfBookmarks.isEmpty && numberedChapters.isEmpty && chineseOutline == nil
                 ? PDFPrintedOutline.read(document) : nil
-            let outline = printedOutline?.outline ?? pdfBookmarks
-            let chapterStarts = outline.isEmpty ? numberedChapters : outline.mapValues(\.title)
-            let contentsPages = printedOutline?.contentsPages ?? (
-                outline.isEmpty
+            let outline = printedOutline?.outline ?? [:]
+            let sourceChapterStarts = Dictionary(uniqueKeysWithValues: entriesByPage.compactMap { page, entries in
+                entries.first(where: { $0.depth == 0 }).map { (page, $0.title) }
+            })
+            let chapterStarts = !sourceEntries.isEmpty ? sourceChapterStarts
+                : (outline.isEmpty ? numberedChapters : outline.mapValues(\.title))
+            let linkedContents = Self.linkedContents(in: document, destinations: Set(pdfBookmarks.map(\.page)))
+            let contentsPages = chineseOutline?.contentsPages ?? printedOutline?.contentsPages ?? (
+                pdfBookmarks.isEmpty
                     ? Self.printedContentsPages(in: document, chapterStarts: chapterStarts)
-                    : Self.linkedContentsPages(in: document, outline: outline)
+                    : linkedContents?.continuations ?? []
             )
             let repeatedMargins = Self.repeatedMarginLines(in: document)
             var chapterTitles = [initialTitle ?? "Front Matter"]
@@ -143,7 +151,7 @@ class BatchProcessor: ObservableObject {
                 }
                 
                 if contentsPages.contains(pageIndex) {
-                    if pageIndex == contentsPages.min() {
+                    if linkedContents == nil && pageIndex == contentsPages.min() {
                         fullHTML += "<!-- PRINTED_CONTENTS -->\n\n"
                     }
                     continue
@@ -298,7 +306,6 @@ class BatchProcessor: ObservableObject {
                 }
                 
                 let visualLabels: Set<String> = ["Picture", "Figure", "Formula", "Table"]
-                let visualIndices = filteredObs.indices.filter { visualLabels.contains(filteredObs[$0].label) }
 
                 // ═══════════════════════════════════════════
                 // STAGE 2: PDFKit 富文字萃取 → TextFragment
@@ -388,15 +395,17 @@ class BatchProcessor: ObservableObject {
                         }
                     }
 
+                    let plainText = recoveredText.replacingOccurrences(of: "\u{0007}", with: "")
+                    let repairedText = PDFTextLines.repairMetricDefinition(PDFTextLines.repairDimensionSymbols(plainText))
                     let fragment = TextFragment(
-                        text: recoveredText.replacingOccurrences(of: "\u{0007}", with: ""),
+                        text: repairedText,
                         bounds: displayRect,
                         fontSize: fontSize * scale,
                         fontName: fontName,
                         isBold: isBold,
                         isItalic: isItalic,
                         colorHex: colorHex,
-                        footnoteMarkers: lineText.contains("\u{0007}") ? [] : footnoteMarkers
+                        footnoteMarkers: lineText.contains("\u{0007}") || repairedText != plainText ? [] : footnoteMarkers
                     )
 
                     textFragments.append(fragment)
@@ -438,6 +447,21 @@ class BatchProcessor: ObservableObject {
                 // Extract visuals after retaining the full set of PDF lines for edge checks.
                 // Text suppression and layout assignment use the same rectangle as the saved image.
                 var visualRegions: [VisualRegion] = []
+                let formulaBounds = PDFTextLines.malformedNumberedFormulaBounds(in: textFragments, pageSize: scaledSize)
+                if !formulaBounds.isEmpty {
+                    filteredObs.removeAll { observation in
+                        guard observation.label == "Formula" else { return false }
+                        let rect = VNImageRectForNormalizedRect(observation.boundingBox, Int(scaledSize.width), Int(scaledSize.height))
+                        let display = CGRect(x: rect.minX, y: scaledSize.height - rect.maxY, width: rect.width, height: rect.height)
+                        return formulaBounds.contains { $0.intersects(display) }
+                    }
+                    for rect in formulaBounds {
+                        let box = CGRect(x: rect.minX / scaledSize.width, y: 1 - rect.maxY / scaledSize.height,
+                                         width: rect.width / scaledSize.width, height: rect.height / scaledSize.height)
+                        filteredObs.append(LayoutBlock(boundingBox: box, label: "Formula", confidence: 1))
+                    }
+                }
+                let visualIndices = filteredObs.indices.filter { visualLabels.contains(filteredObs[$0].label) }
                 var visualFragments: [TextFragment] = []
                 for (imageIndex, observationIndex) in visualIndices.enumerated() {
                     let observation = filteredObs[observationIndex]
@@ -572,6 +596,10 @@ class BatchProcessor: ObservableObject {
                 }
 
                 textFragments.append(contentsOf: visualFragments)
+                let startsLinkedContents = linkedContents?.page == pageIndex
+                if let linkedContents, startsLinkedContents {
+                    textFragments.removeAll { $0.bounds.midY >= linkedContents.verticalOffset * scale }
+                }
 
                 // ═══════════════════════════════════════════
                 // STAGE 3: 佈局分析引擎 → 基於 YOLO 區塊的幾何重組
@@ -643,6 +671,8 @@ class BatchProcessor: ObservableObject {
                 var rawTextForLLM = ""
                 
                 // 文字段落 → Markdown
+                var unmatchedEntries = entriesByPage[pageIndex] ?? []
+                let matchingKeys = unmatchedEntries.isEmpty ? [] : Set(paragraphs.map { Self.outlineHeadingKey($0.unifiedText) })
                 for (index, block) in paragraphs.enumerated() {
                     let isLinkedNote = footnotes.notes[index] != nil || footnotes.references[index] != nil
                     let isRepeatedMargin = !block.fragments.isEmpty && block.fragments.allSatisfy {
@@ -676,12 +706,27 @@ class BatchProcessor: ObservableObject {
                     if footnotes.notes[index] != nil {
                         pageNotes += htmlStr
                     } else {
+                        if !htmlStr.isEmpty, !unmatchedEntries.isEmpty {
+                            let key = Self.outlineHeadingKey(block.unifiedText)
+                            unmatchedEntries.removeAll { entry in
+                                let target = Self.outlineHeadingKey(entry.title)
+                                let reachesDestination = entry.verticalOffset.map {
+                                    !matchingKeys.contains(target) && block.bounds.midY >= $0 * scale
+                                } ?? false
+                                guard key == target || reachesDestination else { return false }
+                                rawTextForLLM += "<span id=\"\(entry.anchor)\"></span>"
+                                return true
+                            }
+                        }
                         rawTextForLLM += htmlStr
                     }
                 }
                 
                 if !rawTextForLLM.isEmpty {
                     pageMD += rawTextForLLM
+                }
+                if startsLinkedContents {
+                    pageMD += "<!-- PRINTED_CONTENTS -->\n\n"
                 }
                 
                 var startsChapter = false
@@ -728,6 +773,9 @@ class BatchProcessor: ObservableObject {
                 if !pageMD.isEmpty {
                     previousContentPage = pageIndex
                 }
+                for entry in unmatchedEntries {
+                    fullHTML += "<span id=\"\(entry.anchor)\"></span>"
+                }
                 fullHTML += pageMD + "\n\n"
                 chapterNotes += pageNotes
                 
@@ -747,6 +795,7 @@ class BatchProcessor: ObservableObject {
             AppLogger.shared.info("開始執行跨頁段落縫合...")
             fullHTML += chapterNotes
             fullHTML = LayoutEngine.stitchCrossPageParagraphs(html: fullHTML)
+            fullHTML = await LayoutEngine.repairWrappedWords(html: fullHTML)
             
             // 📖 決定最終書名：PDF 元資料 → 第一個 .title 區塊 → 預設名稱
             let bookTitle = detectedTitle ?? "Libri-AI_轉譯報告"
@@ -774,7 +823,8 @@ class BatchProcessor: ObservableObject {
                         assetsURL: assetsDir,
                         language: language,
                         chapterTitles: chapterStarts.isEmpty ? nil : chapterTitles,
-                        outlineDepths: outline.isEmpty ? nil : outlineDepths
+                        outlineDepths: outline.isEmpty ? nil : outlineDepths,
+                        sourceEntries: sourceEntries
                     )
                 } else {
                     AppLogger.shared.info("📄 短篇論文模式 (\(document.pageCount) 頁)，啟動標準單頁引擎...")
@@ -855,24 +905,37 @@ class BatchProcessor: ObservableObject {
         return Set(occurrences.filter { $0.value.count >= 3 }.map(\.key))
     }
 
-    private nonisolated static func sourceOutline(in document: PDFDocument) -> [Int: (title: String, depth: Int)] {
-        guard let root = document.outlineRoot else { return [:] }
-        var entries: [Int: (title: String, depth: Int)] = [:]
+    private nonisolated static func outlineHeadingKey(_ text: String) -> String {
+        let title = text.replacingOccurrences(
+            of: #"^\s*(?:[0-9]+(?:[.．][0-9]+)*[.．]?|[A-Z][.．]?)\s+"#,
+            with: "", options: .regularExpression
+        )
+        return PDFPrintedOutline.outlineKey(title)
+    }
+
+    private nonisolated static func sourceOutline(in document: PDFDocument) -> [PDFPrintedOutline.LocatedEntry] {
+        guard let root = document.outlineRoot else { return [] }
+        var entries: [PDFPrintedOutline.LocatedEntry] = []
 
         func visit(_ parent: PDFOutline, depth: Int) {
             for index in 0..<parent.numberOfChildren {
                 guard let entry = parent.child(at: index) else { continue }
+                var childDepth = depth
                 let destination = entry.destination ?? (entry.action as? PDFActionGoTo)?.destination
-                if let page = destination?.page,
+                if let destination, let page = destination.page,
                    let title = entry.label?.trimmingCharacters(in: .whitespacesAndNewlines),
                    !title.isEmpty {
                     let pageIndex = document.index(for: page)
-                    if (0..<document.pageCount).contains(pageIndex),
-                       depth < (entries[pageIndex]?.depth ?? Int.max) {
-                        entries[pageIndex] = (title, depth)
+                    if (0..<document.pageCount).contains(pageIndex) {
+                        let bounds = page.bounds(for: .cropBox)
+                        let y = bounds.maxY - destination.point.y
+                        let offset = page.rotation == 0 && (0...bounds.height).contains(y) ? y : nil
+                        entries.append(.init(title: title, page: pageIndex, depth: depth,
+                                             anchor: "pdf-contents-\(entries.count + 1)", verticalOffset: offset))
+                        childDepth += 1
                     }
                 }
-                visit(entry, depth: depth + 1)
+                visit(entry, depth: childDepth)
             }
         }
 
@@ -880,22 +943,43 @@ class BatchProcessor: ObservableObject {
         return entries
     }
 
-    private nonisolated static func linkedContentsPages(
-        in document: PDFDocument, outline: [Int: (title: String, depth: Int)]
-    ) -> Set<Int> {
-        let destinations = Set(outline.keys)
-        return Set((0..<min(document.pageCount, 20)).filter { index in
-            guard !destinations.contains(index), let page = document.page(at: index),
-                  let heading = page.string?.split(whereSeparator: \.isNewline).first,
-                  ["table of contents", "contents", "目錄"].contains(
-                    heading.trimmingCharacters(in: .whitespaces).lowercased()
-                  ) else { return false }
-            let linkedPages = Set(page.annotations.compactMap { annotation -> Int? in
-                let destination = annotation.destination ?? (annotation.action as? PDFActionGoTo)?.destination
-                return destination?.page.map { document.index(for: $0) }
-            })
-            return linkedPages.intersection(destinations).count >= 3
-        })
+    private nonisolated static func linkedContents(
+        in document: PDFDocument, destinations: Set<Int>
+    ) -> (page: Int, verticalOffset: CGFloat, continuations: Set<Int>)? {
+        guard !destinations.isEmpty else { return nil }
+        let labels = ["tableofcontents", "contents", "目錄", "目次"]
+        let pageLimit = min(document.pageCount, 20)
+
+        func links(on page: PDFPage, below y: CGFloat) -> Int {
+            page.annotations.filter { annotation in
+                guard annotation.bounds.midY < y,
+                      let target = (annotation.destination ?? (annotation.action as? PDFActionGoTo)?.destination)?.page
+                else { return false }
+                return destinations.contains(document.index(for: target))
+            }.count
+        }
+
+        for index in 0..<pageLimit {
+            guard !destinations.contains(index), let page = document.page(at: index), page.rotation == 0,
+                  (page.string ?? "").split(whereSeparator: \.isNewline).contains(where: {
+                      labels.contains(PDFPrintedOutline.outlineKey(String($0)).lowercased())
+                  }) else { continue }
+            let bounds = page.bounds(for: .cropBox)
+            guard let heading = PDFTextLines.selections(in: page, bounds: bounds).first(where: {
+                labels.contains(PDFPrintedOutline.outlineKey($0.string ?? "").lowercased())
+            }) else { continue }
+            let headingY = heading.bounds(for: page).maxY
+            guard links(on: page, below: headingY) >= 3 else { continue }
+
+            var continuations = Set<Int>()
+            for next in (index + 1)..<pageLimit {
+                guard !destinations.contains(next), let following = document.page(at: next),
+                      links(on: following, below: .greatestFiniteMagnitude) >= 3 else { break }
+                continuations.insert(next)
+            }
+            return (index, bounds.maxY - headingY, continuations)
+        }
+        return nil
     }
 
     private nonisolated static func printedContentsPages(
@@ -974,7 +1058,11 @@ class BatchProcessor: ObservableObject {
             guard let cgImage = sourceImage.cgImage else { return nil }
             
             // 2. ✂️ 直接拿 YOLO 算好的絕對座標來切 (毫秒級運算)
-            guard let croppedCGImage = cgImage.cropping(to: cropRect) else { return nil }
+            let pixelRect = cropRect.applying(CGAffineTransform(
+                scaleX: CGFloat(cgImage.width) / sourceImage.size.width,
+                y: CGFloat(cgImage.height) / sourceImage.size.height
+            )).integral
+            guard let croppedCGImage = cgImage.cropping(to: pixelRect) else { return nil }
             
             // 3. 轉回 AppImage 並準備存檔
             let finalImage = AppImage(cgImage: croppedCGImage, size: cropRect.size)

@@ -20,10 +20,11 @@ final class EPUBSynthesizer: Sendable {
     
     // MARK: - XML 安全工具
     
-    /// 移除 XML 1.0 中不合法的控制字元 (例如 \x07 bell, \x08 backspace 等)
+    /// 移除 XML 1.0 不允許的控制字元與 PDFKit 的缺字標記。
     nonisolated static func removeInvalidXMLCharacters(_ text: String) -> String {
         let invalidXMLChars = CharacterSet(charactersIn: "\u{0000}"..."\u{001F}")
             .subtracting(CharacterSet(charactersIn: "\u{0009}\u{000A}\u{000D}"))
+            .union(CharacterSet(charactersIn: "\u{FFFE}\u{FFFF}"))
         return text.components(separatedBy: invalidXMLChars).joined()
     }
 
@@ -322,7 +323,8 @@ final class EPUBSynthesizer: Sendable {
         assetsURL: URL,
         language: NLLanguage = .undetermined,
         chapterTitles: [String]? = nil,
-        outlineDepths: [Int]? = nil
+        outlineDepths: [Int]? = nil,
+        sourceEntries: [PDFPrintedOutline.LocatedEntry] = []
     ) -> URL? {
         let fm = FileManager.default
         let epubURL = fm.temporaryDirectory.appendingPathComponent(safeFilename(for: title)).appendingPathExtension("epub")
@@ -344,6 +346,7 @@ final class EPUBSynthesizer: Sendable {
             var hasPart = false
             var navigationOrder = 0
             var chapterEntries: [EPUBArchiveEntry] = []
+            var printedTargets: [String: String] = [:]
             
             for (index, chapterHTML) in rawChapters.enumerated() {
                 let chapterId = "chapter_\(index + 1)"
@@ -408,6 +411,13 @@ final class EPUBSynthesizer: Sendable {
                 manifestItems += "<item id=\"\(chapterId)\" href=\"\(fileName)\" media-type=\"application/xhtml+xml\"/>\n"
                 spineItems += "<itemref idref=\"\(chapterId)\"/>\n"
                 
+                if !sourceEntries.isEmpty {
+                    let anchors = htmlBody.matches(of: #/id="(pdf-contents-[0-9]+)"/#)
+                    for anchor in anchors {
+                        printedTargets[String(anchor.1)] = "\(fileName)#\(anchor.1)"
+                    }
+                    continue
+                }
                 if nativeOutline != nil { continue }
                 // 📖 建構章節目錄 (含內部標題)
                 navLinks += "<li><a href=\"\(fileName)\">\(safeTitle)</a>\n"
@@ -461,25 +471,35 @@ final class EPUBSynthesizer: Sendable {
                 ncxNavPoints += "</navPoint>\n"
             }
 
-            if let nativeOutline, let sourceTitles {
-                var index = nativeOutline.firstIndex(where: { $0 >= 0 }) ?? nativeOutline.count
+            var sourceNavigation: [(title: String, depth: Int, target: String)] = []
+            if !sourceEntries.isEmpty {
+                sourceNavigation = sourceEntries.compactMap { entry in
+                    printedTargets[entry.anchor].map { (entry.title, entry.depth, $0) }
+                }
+            } else if let nativeOutline, let sourceTitles {
+                sourceNavigation = nativeOutline.enumerated().compactMap { index, depth in
+                    depth >= 0 ? (sourceTitles[index], depth, "chapter_\(index + 1).xhtml") : nil
+                }
+            }
+            if !sourceNavigation.isEmpty {
+                var index = 0
                 func renderLevel(_ depth: Int) -> (nav: String, ncx: String) {
                     var nav = ""
                     var ncx = ""
-                    while index < nativeOutline.count, nativeOutline[index] == depth {
-                        let label = sanitizeForXML(sourceTitles[index])
-                        let fileName = "chapter_\(index + 1).xhtml"
+                    while index < sourceNavigation.count, sourceNavigation[index].depth == depth {
+                        let entry = sourceNavigation[index]
+                        let label = sanitizeForXML(entry.title)
                         index += 1
                         navigationOrder += 1
                         let playOrder = navigationOrder
                         let children = renderLevel(depth + 1)
-                        nav += "<li><a href=\"\(fileName)\">\(label)</a>"
+                        nav += "<li><a href=\"\(entry.target)\">\(label)</a>"
                         if !children.nav.isEmpty { nav += "<ol>\(children.nav)</ol>" }
                         nav += "</li>\n"
                         ncx += """
                         <navPoint id="navPoint-\(playOrder)" playOrder="\(playOrder)">
                             <navLabel><text>\(label)</text></navLabel>
-                            <content src="\(fileName)"/>
+                            <content src="\(entry.target)"/>
                             \(children.ncx)
                         </navPoint>
 
@@ -489,10 +509,11 @@ final class EPUBSynthesizer: Sendable {
                 }
                 (navLinks, ncxNavPoints) = renderLevel(0)
             }
-            let tocDepth = nativeOutline.map { ($0.max() ?? 0) + 1 } ?? (hasPart ? 2 : 1)
+            let tocDepth = sourceNavigation.map(\.depth).max().map { $0 + 1 } ?? (hasPart ? 2 : 1)
 
             // Reuse the electronic navigation links for the in-book contents.
-            let contents = "<nav class=\"book-contents\" epub:type=\"toc\" aria-label=\"Contents\"><h2>Contents</h2><ol>\(navLinks)</ol></nav>"
+            let contentsTitle = language.rawValue.hasPrefix("zh") ? "目錄" : "Contents"
+            let contents = "<nav class=\"book-contents\" epub:type=\"toc\" aria-label=\"\(contentsTitle)\"><h2>\(contentsTitle)</h2><ol>\(navLinks)</ol></nav>"
             for (index, entry) in chapterEntries.enumerated() {
                 guard let html = String(data: entry.data, encoding: .utf8),
                       html.contains("<!-- PRINTED_CONTENTS -->") else { continue }
